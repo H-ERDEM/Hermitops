@@ -111,6 +111,7 @@
   .badge.off { border: 1px solid var(--axis); color: var(--ink-2); }
   .w .doing { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; min-height: 18px; }
   .w.spot .doing { color: var(--violet); font-weight: 600; }
+  .w .doing .oj { opacity: .7; font-style: italic; }
   .w .rep { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .w .r { height: 6px; border-radius: 3px; background: var(--hair); overflow: hidden; position: relative; }
   .w .r i { display: block; height: 100%; background: var(--ink-2); }
@@ -486,14 +487,18 @@
       if (w.caught) badges.append(el("span", "badge caught", w.caught > 1 ? `yakalandı ×${w.caught}` : "yakalandı"));
       if (!w.available) badges.append(el("span", "badge off", "duraklatıldı"));
       top.append(badges);
-      const doing = flashing ? "sınama işinde yakalandı" : w.doing ? (w.doing.spot ? "sınama işi (cevabı bilinen görev)" : `${w.doing.module} · ${w.doing.task}`) : "boşta";
+      // Worker gösterilen işten BAŞKA bir işin görevindeyse bunu belirt (görev id'si ekrandaki DAG'de yoktur).
+      const onOtherJob = Boolean(w.doing && !w.doing.spot && w.doing.jobId && jobId && w.doing.jobId !== jobId);
+      const doingText = flashing ? "sınama işinde yakalandı" : w.doing ? (w.doing.spot ? "sınama işi (cevabı bilinen görev)" : `${w.doing.module} · ${w.doing.task}`) : "boşta";
+      const doingEl = el("div", "doing", doingText);
+      if (onOtherJob) doingEl.append(el("span", "oj", ` · başka iş ${short(w.doing.jobId)}`));
       const rep = el("div", "rep");
       const r = el("div", "r");
       const fill = el("i"); fill.style.width = `${(w.reputation * 100).toFixed(1)}%`;
       const tau = el("span", "tau"); tau.style.left = `${TAU * 100}%`; tau.title = "τ = 0,95";
       r.append(fill, tau);
       rep.append(r, el("span", "", `R ${w.reputation.toFixed(3)} · α ${w.alpha.toFixed(1)} · β ${w.beta.toFixed(1)}`));
-      card.append(top, el("div", "doing", doing), rep);
+      card.append(top, doingEl, rep);
       box.append(card);
     }
   }

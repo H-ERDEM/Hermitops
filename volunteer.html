@@ -41,7 +41,9 @@
     <label>Ödeme adresi (isteğe bağlı): Solana Devnet cüzdanı
       <input type="text" id="wallet" autocomplete="off" spellcheck="false" placeholder="ör. FKqF…eyrF">
     </label>
-    <p class="muted" id="walletHint">Doğrulanan her sonuç için iş bitince test USDC (Devnet, gerçek para değil) bu adrese gönderilir. Boş bırakırsanız katılabilirsiniz, ödeme yapılmaz.</p>
+    <p><button type="button" id="connectWallet">Phantom ile bağlan</button>
+      <span id="walletStatus" class="muted"></span></p>
+    <p class="muted" id="walletHint">Doğrulanan her sonuç için iş bitince test USDC (Devnet, gerçek para değil) bu adrese gönderilir. Boş bırakırsanız katılabilirsiniz, ödeme yapılmaz. Phantom cüzdanı aynı adresi tüm ağlarda kullanır; buradaki adres Devnet alımları için geçerlidir.</p>
     <p><button id="agree">Katılıyorum, başlat</button></p>
   </section>
 
