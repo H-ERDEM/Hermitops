@@ -149,6 +149,7 @@
     <label class="f" for="budget">Bütçe (USDC)</label>
     <input type="number" id="budget" min="0.001" step="0.01" value="0.1">
     <div class="row2"><button class="btn" id="quoteBtn">Teklif al</button><button class="btn primary" id="payBtn">Öde ve gönder</button></div>
+    <div class="row2"><button class="btn" id="phantomPayBtn" hidden>Phantom ile öde (tarayıcı)</button></div>
     <div class="quote" id="quote" hidden></div>
     <div class="other" id="otherJob" hidden></div>
     <ol class="steps" id="steps" hidden></ol>
@@ -308,6 +309,41 @@
   }
 
   function canPay() { return !info.payment || info.buyerAvailable; }
+
+  // Faz B: alıcı x402 ödemesini TARAYICIDA Phantom ile imzalar (sunucudaki BUYER_PRIVATE_KEY kullanılmaz).
+  // Ödeme modülü pkg/pay.bundle.js'tir (npm run build:pay). Bu uç, sunucudaki /jobs ile aynıdır.
+  function phantomProvider() {
+    if (window.phantom?.solana?.isPhantom) return window.phantom.solana;
+    if (window.solana?.isPhantom) return window.solana;
+    return null;
+  }
+  async function phantomPay() {
+    const provider = phantomProvider();
+    if (!provider) { $("buyerHint").textContent = "Phantom bulunamadı — kurup Devnet'e geçin, sayfayı http://localhost adresinden açın."; return; }
+    const btn = $("phantomPayBtn");
+    btn.disabled = true;
+    const steps = [];
+    try {
+      const { publicKey } = await provider.connect();
+      const address = publicKey.toString();
+      let mod;
+      try { mod = await import("/pkg/pay.bundle.js"); }
+      catch { $("buyerHint").textContent = "Phantom ödeme modülü derlenmemiş: npm run build:pay"; return; }
+      const budget = Number($("budget").value);
+      renderSteps([{ kind: "request", t: Date.now(), detail: {} }], true);
+      const out = await mod.hermitPay({
+        provider, address, maxAtomic: BigInt(Math.round(budget * 1e6)),
+        url: `/jobs${selectedQuery()}`, body: JSON.stringify(dag),
+        onStep: (s) => { steps.push(s); renderSteps(steps, true); },
+      });
+      if (out.ok) { renderSteps(steps, false); ownJobId = out.jobId; setJob(out.jobId); }
+      else { renderSteps(steps, false, out.error); $("buyerHint").textContent = `Hata: ${out.error}`; }
+    } catch (e) {
+      $("buyerHint").textContent = e?.code === 4001 ? "Phantom'da reddedildi." : `Ödeme hatası: ${e?.message ?? e}`;
+    } finally {
+      btn.disabled = false;
+    }
+  }
 
   function setJob(id) {
     if (id === jobId) return;
@@ -608,6 +644,9 @@
     }
     $("quoteBtn").onclick = getQuote;
     $("payBtn").onclick = pay;
+    $("phantomPayBtn").onclick = phantomPay;
+    // Tarayıcıda Phantom ile ödeme, sunucu alıcı anahtarından bağımsızdır: ödeme açıkken daima sunulur.
+    if (info.payment) $("phantomPayBtn").hidden = false;
     if (!info.payment) {
       $("payBtn").textContent = "Gönder (ödemesiz)";
       $("buyerHint").textContent = "Koordinatörde ödeme kapalı. Ödemeli demo için: PAYMENTS=1 npm run coordinator";

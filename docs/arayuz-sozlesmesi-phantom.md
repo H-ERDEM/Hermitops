@@ -1,8 +1,9 @@
 # Arayüz Sözleşmesi — Phantom (Devnet) cüzdan entegrasyonu
 
-**Durum:** Faz A uygulandı (2026-11-27). Faz B planlı.
-**Kapsam:** Gönüllü (worker) tarafında Phantom ile ödeme adresi bağlama. Alıcı (buyer) tarafı
-değişmedi; x402 ödemesi sunucuda `BUYER_PRIVATE_KEY` ile imzalanmaya devam eder.
+**Durum:** Faz A uygulandı (2026-11-27). Faz B uygulandı (2026-11-28).
+**Kapsam:** Worker tarafında Phantom ile ödeme adresi bağlama (Faz A) **ve** alıcının x402
+ödemesini tarayıcıda Phantom ile imzalaması (Faz B). Sunucudaki `BUYER_PRIVATE_KEY` ile
+sunucu-imzalı akış (`/demo/buy`) yedek olarak korunur.
 
 Bu doküman, Phantom eklentisinin projeye nasıl bağlandığını ve hangi sınırların korunduğunu
 belgeler. "Sözleşme", değişen/değişmeyen arayüzlerin (WS mesajları, HTTP API, config) birlikte
@@ -13,7 +14,7 @@ dondurulmuş hâlidir.
 | Rol | Phantom'un işi | İmza | Bu fazda |
 |---|---|---|---|
 | **Worker** | Ödeme (alım) adresini otomatik doldurur | Hayır (yalnızca alıcı) | ✅ uygulandı |
-| **Buyer** | x402 ödemesini (USDC transferi) imzalar | Evet | ⏳ Faz B |
+| **Buyer** | x402 ödemesini (USDC transferi) imzalar | Evet | ✅ Faz B |
 
 ## 2. Tasarım kararları (Faz A)
 
@@ -50,13 +51,28 @@ dondurulmuş hâlidir.
 Hata durumları: Phantom yok → kurulum ipucu; kullanıcı reddi (`4001`) → "Bağlantı reddedildi";
 beklenmedik adres → hata ve elle giriş önerisi.
 
-## 5. Faz B (planlı, bu fazda YOK)
+## 5. Faz B — tarayıcıda Phantom ile x402 ödemesi (uygulandı)
 
-Alıcının x402 ödemesini tarayıcıda Phantom ile imzalaması. Gerektirir:
-- `@x402/svm` istemcisinin tarayıcıya **bundle** edilmesi (esbuild) — yeni build adımı.
-- Phantom'un `@solana/kit` `TransactionSigner` arayüzüne adapte edilmesi (`signTransaction`).
-- Yeni uç nokta sözleşmesi: panel Phantom'dan imzalı payload alır → `POST /jobs`'a
-  `PAYMENT-SIGNATURE` başlığıyla gönderir; sunucu `BUYER_PRIVATE_KEY` kullanmaz.
-- Facilitator (x402.org) uyumunun Devnet'te doğrulanması.
+Alıcı, panel'deki **"Phantom ile öde (tarayıcı)"** düğmesiyle ödemeyi kendi Phantom cüzdanında
+imzalar; sunucudaki `BUYER_PRIVATE_KEY` kullanılmaz.
 
-Bu, ayrı ve daha büyük bir iştir; ana deneyleri etkilemez (x402 MoSCoW'da "Should").
+**Sunucu değişmedi.** `JobPayments.submit` (payments.ts) imzalayandan bağımsızdır: yalnızca
+`PAYMENT-SIGNATURE` başlığını okuyup facilitator'da doğrular/kesinleştirir. `POST /jobs` aynı uçtur.
+
+**Mimari:**
+- **Bundle:** `coordinator/web/pay-entry.js`, `npm run build:pay` ile `pkg/pay.bundle.js`'e derlenir
+  (esbuild, `--platform=browser`). `pkg/` gitignore'dadır (WASM gibi); derlenmezse düğme
+  "modül derlenmemiş" uyarısı verir. Panel bunu `import("/pkg/pay.bundle.js")` ile yükler.
+- **İmza akışı:** `wrapFetchWithPayment(fetch, x402Client(ExactSvmScheme(phantomSigner)))` →
+  `/jobs` POST → 402 → `ExactSvmScheme` client, facilitator'ın verdiği `feePayer` + `blockhash`
+  ile tx mesajını kurar → `phantomSigner.signTransactions` çağrılır → 201.
+- **Phantom → kit adaptörü:** `ClientSvmSigner = @solana/kit TransactionSigner`. Adaptör kit tx'ini
+  (`messageBytes`) web3.js `VersionedTransaction`'a çevirip `provider.signTransaction` ile
+  imzalatır, alıcının 64 baytlık imzasını `SignatureDictionary` olarak döndürür. Phantom yalnızca
+  co-signer'dır; ücreti facilitator öder, zinciri facilitator gönderir — tarayıcıda RPC gerekmez.
+- **Politika:** yalnızca Devnet + Devnet USDC + bütçe (`devnetPolicyWithMax`), Faz A/CLI ile aynı.
+
+**Doğrulama sınırı:** Bundle derlenmesi, tarayıcıda yüklenmesi, `x402Client` kurulması ve
+`hermitPay` → `/jobs` → 201 akışı (imza dalı hariç) otomatik testle doğrulandı. **Gerçek Devnet
+imzası/kesinleşmesi** gerçek Phantom cüzdanı + kullanıcı onayı gerektirir (otomatikleştirilemez);
+`PAYMENTS=1` koordinatöre karşı elle denenmelidir.

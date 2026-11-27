@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "wasm-pack build --release --target web --out-dir pkg",
+    "build:pay": "esbuild coordinator/web/pay-entry.js --bundle --format=esm --platform=browser --define:process.env.NODE_ENV='\"production\"' --outfile=pkg/pay.bundle.js",
     "serve": "python3 -m http.server 8080",
     "coordinator": "npm --workspace coordinator start",
     "submit": "npm --workspace coordinator run submit --",
@@ -33,6 +34,7 @@
     "mcp-inspector": "npm --workspace coordinator run mcp-inspector"
   },
   "devDependencies": {
+    "esbuild": "^0.25.0",
     "playwright": "^1.50.0"
   }
 }
