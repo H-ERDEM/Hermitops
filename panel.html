@@ -81,6 +81,9 @@
   .jobhead { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin-bottom: 10px; color: var(--ink-2); font-size: 13px; }
   .jobhead b { color: var(--ink); font-size: 16px; }
   .chip { font-size: 12px; border-radius: 999px; padding: 2px 10px; border: 1px solid var(--axis); color: var(--ink-2); white-space: nowrap; }
+  .cbom-badge { font-size: 12px; border-radius: 999px; padding: 2px 10px; border: 1px solid var(--good); color: var(--good-text); text-decoration: none; white-space: nowrap; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+  .cbom-badge:hover { background: color-mix(in srgb, var(--good) 10%, transparent); }
+  .cbom-badge.warn { border-color: var(--axis); color: var(--ink-2); }
   .chip.RUNNING { border-color: var(--blue); color: var(--blue); }
   .chip.COMPLETED { border-color: var(--good); color: var(--good-text); }
   .chip.FAILED { border-color: var(--critical); color: var(--critical); }
@@ -136,6 +139,7 @@
   <h1>Tarayıcı tabanlı gönüllü hesaplama · canlı demo</h1>
   <div class="join" id="join"></div>
   <div class="conn" id="conn">bağlanıyor…</div>
+  <a class="cbom-badge" id="cbomBadge" href="/cbom" target="_blank" rel="noopener" hidden>🔒 kripto</a>
 </header>
 <main>
   <section class="card buyer">
@@ -362,6 +366,26 @@
     if (id === jobId) return;
     jobId = id; jobDone = false;
     $("ledger").hidden = true;
+  }
+
+  // Güven/kripto rozeti: koordinatörün Rust'tan ürettiği CBOM'u (GET /cbom) özetler.
+  async function loadCbomBadge() {
+    const badge = $("cbomBadge");
+    try {
+      const cbom = await (await fetch("/cbom")).json();
+      if (!cbom || !cbom.components) throw new Error("boş");
+      const assets = cbom.components.filter((c) => c.type === "cryptographic-asset");
+      // Başlıkta en anlamlı üçlü: imza, özet, protokol; CSPRNG ve anahtar materyali sona.
+      const rank = (c) => { const p = c.cryptoProperties?.algorithmProperties?.primitive; if (p === "signature") return 0; if (p === "hash") return 1; if (c.cryptoProperties?.assetType === "protocol") return 2; return 9; };
+      const algos = assets.filter((c) => ["algorithm", "protocol"].includes(c.cryptoProperties?.assetType)).sort((a, b) => rank(a) - rank(b)).map((c) => c.name);
+      const tls = (cbom.metadata?.properties || []).find((p) => p.name === "cbom:transport");
+      badge.textContent = `🔒 ${algos.slice(0, 3).join(" · ")}`;
+      badge.title = `Kriptografik envanter (CycloneDX CBOM, Rust ile üretilir)\n${assets.map((c) => "• " + c.name).join("\n")}\n\n${tls ? tls.value : ""}\nTıkla: tam CBOM (/cbom)`;
+      badge.hidden = false;
+    } catch {
+      // CBOM üretilmemişse (npm run build:cbom) rozeti sessizce gösterme.
+      badge.hidden = true;
+    }
   }
 
   // ---------- İş (DAG çizimi) ----------
@@ -677,6 +701,7 @@
     $("join").textContent = "";
     if (urls.length) $("join").append("Gönüllü olmak için telefonda açın: ", el("b", "", urls.join("  ·  ")));
     else $("join").append("Gönüllü sayfası: ", el("b", "", `${location.origin}/`));
+    loadCbomBadge();
     tick();
   }
   init();
