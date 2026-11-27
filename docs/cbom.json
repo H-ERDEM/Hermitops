@@ -1,0 +1,177 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:7b3c0e2a-9d41-4e8b-bf0a-1c2d3e4f5a60",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-28T00:00:00Z",
+    "lifecycles": [{ "phase": "design" }],
+    "component": {
+      "type": "application",
+      "bom-ref": "pkg:app/wasm-worker-proto@0.2.0",
+      "name": "wasm-worker-proto",
+      "version": "0.2.0",
+      "description": "Tarayıcı tabanlı gönüllü hesaplama platformu (Rust/WASM görevleri, koordinatör, x402 Solana Devnet USDC ödemeleri)."
+    },
+    "authors": [{ "name": "wasm-worker-proto" }],
+    "properties": [
+      { "name": "cbom:scope", "value": "Statik kriptografik envanter — belgeleme amaçlı, uygulamanın ana odağı değil." },
+      { "name": "cbom:environment", "value": "Yalnızca Solana Devnet + Devnet USDC; gerçek para ya da üretim anahtarı yoktur." },
+      { "name": "cbom:transport", "value": "Demo taşıması TLS'siz: koordinatör HTTP (127.0.0.1) ve WebSocket (ws://). Dış ağa açılırsa ters vekil arkasında TLS gerekir." },
+      { "name": "cbom:quantum", "value": "Ed25519 ve SHA-256 post-kuantum dayanıklı değildir; imza şeması Solana zinciri tarafından dayatıldığı için crypto-agility sınırlıdır." }
+    ]
+  },
+  "components": [
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "crypto/algorithm/ed25519",
+      "name": "Ed25519",
+      "description": "EdDSA imza şeması (Curve25519). Cüzdan kimliği ve x402 ödeme işlemlerinin imzalanması.",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "signature",
+          "parameterSetIdentifier": "Ed25519",
+          "curve": "curve25519",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "generic",
+          "certificationLevel": ["none"],
+          "cryptoFunctions": ["keygen", "sign", "verify"],
+          "classicalSecurityLevel": 128,
+          "nistQuantumSecurityLevel": 0
+        },
+        "oid": "1.3.101.112"
+      },
+      "evidence": {
+        "occurrences": [
+          { "location": "payments/x402-proto/src/keygen.ts", "additionalContext": "webcrypto.subtle.generateKey({name:'Ed25519'}) — alıcı/platform/facilitator anahtar çiftleri" },
+          { "location": "coordinator/src/solana-chain.ts", "additionalContext": "worker ödemeleri ve iade işleminin imzalanması" },
+          { "location": "coordinator/web/pay-entry.js", "additionalContext": "tarayıcıda Phantom ile x402 ödeme imzası (Faz B)" },
+          { "location": "coordinator/src/api/demo-buyer.ts", "additionalContext": "sunucu-imzalı alıcı ödemesi" },
+          { "location": "coordinator/src/cli/submit.ts", "additionalContext": "CLI alıcısının ödeme imzası" },
+          { "location": "coordinator/src/cli/mcp-agent.ts", "additionalContext": "MCP ajanı ödeme imzası" }
+        ]
+      }
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "crypto/algorithm/sha-256",
+      "name": "SHA-256",
+      "description": "Kriptografik özet. İki ayrı amaç: (1) sha_chain görevinin belirlenimci hesabı, (2) WASM paketi ve sonuç bütünlüğü.",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "hash",
+          "parameterSetIdentifier": "256",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "generic",
+          "certificationLevel": ["none"],
+          "cryptoFunctions": ["digest"],
+          "classicalSecurityLevel": 128,
+          "nistQuantumSecurityLevel": 2
+        },
+        "oid": "2.16.840.1.101.3.4.2.1"
+      },
+      "evidence": {
+        "occurrences": [
+          { "location": "src/sha_chain.rs", "additionalContext": "sha_chain görevi (Rust/WASM, sha2 crate)" },
+          { "location": "js-baseline.js", "additionalContext": "sha_chain saf JS uygulaması (vektörlerle doğrulanan ikinci uygulama)" },
+          { "location": "scripts/ref_vectors.py", "additionalContext": "Python referans vektörleri" },
+          { "location": "coordinator/src/modules.ts", "additionalContext": "bundleHash/moduleHash = 'sha256:<hex>' — WASM paketi bütünlüğü" },
+          { "location": "coordinator/src/oracle.ts", "additionalContext": "sınama işi kâhini; kanonik JSON çıktısının karşılaştırılması" }
+        ]
+      }
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "crypto/algorithm/csprng-platform",
+      "name": "Platform CSPRNG",
+      "description": "Platform güvenli rastgele üreteci (Node/WebCrypto). İş ve worker kimlikleri (randomUUID) için; anahtar materyali ÜRETMEZ (anahtarlar Ed25519 keygen ile üretilir).",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "drbg",
+          "executionEnvironment": "software-plain-ram",
+          "implementationPlatform": "generic",
+          "cryptoFunctions": ["generate"]
+        }
+      },
+      "evidence": {
+        "occurrences": [
+          { "location": "coordinator/src/coordinator.ts", "additionalContext": "job_<randomUUID> iş kimlikleri" },
+          { "location": "coordinator/src/oracle.ts", "additionalContext": "worker/olay kimlikleri" }
+        ]
+      }
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "crypto/protocol/x402",
+      "name": "x402",
+      "description": "HTTP 402 üzerinden stablecoin mikro-ödeme protokolü (v2, 'exact' şeması). Ödeme payload'ı base64 kodlu, Ed25519 ile imzalı Solana işlemidir.",
+      "cryptoProperties": {
+        "assetType": "protocol",
+        "protocolProperties": {
+          "type": "other",
+          "version": "2"
+        }
+      },
+      "evidence": {
+        "occurrences": [
+          { "location": "coordinator/src/api/payments.ts", "additionalContext": "sunucu: PAYMENT-SIGNATURE doğrulama + facilitator kesinleştirme" },
+          { "location": "coordinator/web/pay-entry.js", "additionalContext": "tarayıcı istemcisi (Phantom imzası)" },
+          { "location": "payments/x402-proto/src/config.ts", "additionalContext": "ağ (Solana Devnet) ve USDC mint sabitleri" }
+        ]
+      }
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "crypto/key/ed25519-devnet-wallet",
+      "name": "Ed25519 Devnet anahtar çiftleri",
+      "description": "Alıcı, platform, facilitator ve gönüllü cüzdan anahtarları. Tek kullanımlık Devnet anahtarları; .env'de (mode 0600) tutulur, asla commit edilmez.",
+      "cryptoProperties": {
+        "assetType": "related-crypto-material",
+        "relatedCryptoMaterialProperties": {
+          "type": "private-key",
+          "state": "active",
+          "algorithmRef": "crypto/algorithm/ed25519",
+          "size": 256
+        }
+      },
+      "evidence": {
+        "occurrences": [
+          { "location": "payments/x402-proto/.env.example", "additionalContext": "BUYER/PLATFORM/FACILITATOR anahtar yuvaları (gerçek .env commit edilmez)" }
+        ]
+      }
+    },
+    {
+      "type": "data",
+      "bom-ref": "encoding/base58-base64",
+      "name": "base58 / base64 kodlama",
+      "description": "Kriptografik primitif DEĞİL; tamlık için listelenir. base58 (@scure/base) adres/anahtar kodlaması, base64 ise imzalı işlem wire formatı için kullanılır.",
+      "properties": [
+        { "name": "occurrence", "value": "payments/x402-proto/src/keygen.ts (base58 anahtar/adres)" },
+        { "name": "occurrence", "value": "coordinator/web/pay-entry.js (base64 wire tx, web3.js köprüsü)" }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:app/wasm-worker-proto@0.2.0",
+      "dependsOn": [
+        "crypto/algorithm/ed25519",
+        "crypto/algorithm/sha-256",
+        "crypto/algorithm/csprng-platform",
+        "crypto/protocol/x402",
+        "crypto/key/ed25519-devnet-wallet"
+      ]
+    },
+    {
+      "ref": "crypto/protocol/x402",
+      "dependsOn": ["crypto/algorithm/ed25519"]
+    },
+    {
+      "ref": "crypto/key/ed25519-devnet-wallet",
+      "dependsOn": ["crypto/algorithm/ed25519"]
+    }
+  ]
+}
