@@ -317,9 +317,22 @@
     if (window.solana?.isPhantom) return window.solana;
     return null;
   }
+  // Geç enjeksiyon için kısa bekleme (Faz A gönüllü sayfasıyla aynı davranış).
+  function waitForPhantom(timeoutMs = 3000) {
+    return new Promise((resolve) => {
+      const now = phantomProvider();
+      if (now) return resolve(now);
+      const started = Date.now();
+      const iv = setInterval(() => {
+        const p = phantomProvider();
+        if (p || Date.now() - started > timeoutMs) { clearInterval(iv); resolve(p); }
+      }, 100);
+    });
+  }
   async function phantomPay() {
-    const provider = phantomProvider();
-    if (!provider) { $("buyerHint").textContent = "Phantom bulunamadı — kurup Devnet'e geçin, sayfayı http://localhost adresinden açın."; return; }
+    $("buyerHint").textContent = "Phantom aranıyor…";
+    const provider = await waitForPhantom();
+    if (!provider) { $("buyerHint").textContent = "Phantom bulunamadı — kurup Devnet'e geçin, sayfayı http://localhost adresinden açın; gizli pencere kullanmayın."; return; }
     const btn = $("phantomPayBtn");
     btn.disabled = true;
     const steps = [];
