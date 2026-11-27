@@ -1,8 +1,11 @@
 # Kriptografik Envanter (CBOM)
 
-**Durum:** Statik, tek seferlik envanter (2026-11-28). Belgeleme amaçlıdır; uygulamanın
-ana odağı değildir ve çalışma zamanına girmez.
+**Durum:** Statik envanter (2026-11-28). Belgeleme amaçlıdır; uygulamanın ana odağı değildir
+ve çalışma zamanı davranışını değiştirmez.
+**Kaynak:** Rust'ta üretilir — [`src/cbom.rs`](../src/cbom.rs) (tek doğruluk kaynağı).
 **Makine-okunur sürüm:** [`cbom.json`](cbom.json) — CycloneDX 1.6 "Cryptography Bill of Materials".
+**Erişim:** üç yoldan — CLI (`npm run build:cbom` → `cargo run --bin cbom`), WASM export
+(`cbom_json()`, tarayıcıdan çağrılabilir) ve HTTP API (**`GET /cbom`**, koordinatör sunar).
 
 Bu doküman, projenin kullandığı kriptografik varlıkları (algoritmalar, anahtarlar, protokoller)
 tek yerde toplar. CBOM, SBOM'un kriptografiye odaklı özelleşmesidir; amaç, sistemin **güven
@@ -66,9 +69,22 @@ Böylece CBOM, raporun "güvenlik değerlendirmesi / sınırlılıklar" bölüm�
 uygulamanın ana araştırma sorularına (zamanlama, itibar tabanlı doğrulama, mikro-ödeme) dokunmayan
 hafif bir belge katmanı olarak kalır.
 
-## 5. Güncelleme
+## 5. Üretim ve güncelleme (Rust)
 
-Bu envanter **elle** tutulur ve kripto yüzeyi değiştiğinde (yeni imza şeması, TLS eklenmesi, yeni
-ağ) güncellenmelidir. İleride otomatikleştirmek istenirse CycloneDX ekosistemindeki CBOM tarama
-araçları (ör. `cbomkit`) başlangıç noktası olabilir — ancak bunu sisteme gömmek kapsamı
-"tedarik-zinciri güvenlik aracı"na kaydırır ve bilinçli bir karar gerektirir (bkz. [ROADMAP](ROADMAP.md)).
+CBOM artık **elle tutulan bir dosya değil**, Rust'ta üretilir:
+
+- **Kaynak:** [`src/cbom.rs`](../src/cbom.rs) — `cbom_json()` CycloneDX belgesini `serde_json` ile
+  kurar; SHA-256 occurrence'larına gerçek görev kaydını (`list_modules()`) ekler. Çıktı
+  deterministiktir (sabit zaman damgası), böylece yeniden üretim gereksiz git değişikliği yaratmaz.
+- **CLI:** `npm run build:cbom` (= `cargo run --quiet --bin cbom -- --out docs/cbom.json`).
+- **WASM:** aynı fonksiyon `#[wasm_bindgen] cbom_json()` ile dışa verilir; `npm run build`
+  sonrası tarayıcıdan `cbom_json()` çağrılabilir.
+- **HTTP API:** koordinatör **`GET /cbom`** (ve `/cbom.json`) ile `docs/cbom.json`'u sunar
+  ([http.ts](../coordinator/src/api/http.ts)). Dosya yoksa 404 + "npm run build:cbom" ipucu döner.
+- **Test:** `cargo test cbom` üretilen belgenin geçerli CycloneDX olduğunu ve beş kriptografik
+  varlığı içerdiğini doğrular.
+
+Kripto yüzeyi değiştiğinde (yeni imza şeması, TLS, yeni ağ) `src/cbom.rs` güncellenip `npm run
+build:cbom` çalıştırılır. Tam otomatik tarama (ör. `cbomkit`) istenirse başlangıç noktası olabilir;
+ancak bunu sisteme gömmek kapsamı "tedarik-zinciri güvenlik aracı"na kaydırır ve bilinçli bir karar
+gerektirir (bkz. [ROADMAP](ROADMAP.md)).

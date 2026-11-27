@@ -14,6 +14,7 @@
   "scripts": {
     "build": "wasm-pack build --release --target web --out-dir pkg",
     "build:pay": "esbuild coordinator/web/pay-entry.js --bundle --format=esm --platform=browser --define:process.env.NODE_ENV='\"production\"' --outfile=pkg/pay.bundle.js",
+    "build:cbom": "cargo run --quiet --bin cbom -- --out docs/cbom.json",
     "serve": "python3 -m http.server 8080",
     "coordinator": "npm --workspace coordinator start",
     "submit": "npm --workspace coordinator run submit --",
