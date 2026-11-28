@@ -11,6 +11,7 @@ const nav = [
   { href: "/", label: "Gönüllü" },
   { href: "/panel", label: "Panel" },
   { href: "/kontrol", label: "Kontrol" },
+  { href: "/benchmark", label: "Kıyas" },
 ];
 
 // Koyu temayı ilk boyamadan önce ayarla (flash yok): sistem tercihini izler.

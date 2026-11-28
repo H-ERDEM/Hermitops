@@ -4,6 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { createServer } from "../src/server.ts";
 import type { Config } from "../src/config.ts";
 import { readShared } from "../src/config.ts";
@@ -144,9 +145,14 @@ test("ajan uç noktaları: boş görev 400, bilinmeyen plan 404, kontrol sayfas�
     assert.equal((await post(s, "/agent/plan", { prompt: "özet", maxUsdc: -1 })).status, 400);
     assert.equal((await post(s, "/agent/approve", { planId: "plan_yok" })).status, 404);
     assert.equal((await fetch(`${s.url}/agent/plans/plan_yok`)).status, 404);
+    // /kontrol artık Next statik export'undan (frontend/out) sunulur; yalnızca derlenmişse.
     const page = await fetch(`${s.url}/kontrol`);
-    assert.equal(page.status, 200);
-    assert.match(await page.text(), /Kontrol Merkezi/);
+    if (existsSync(new URL("../../frontend/out/kontrol.html", import.meta.url))) {
+      assert.equal(page.status, 200);
+      assert.match(await page.text(), /Kontrol merkezi/i);
+    } else {
+      assert.equal(page.status, 404); // UI derlenmemiş (npm run build:web)
+    }
     assert.ok(readShared("examples/image-pipeline.json"));
   }));
 

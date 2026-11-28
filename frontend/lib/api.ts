@@ -97,6 +97,23 @@ export interface ExampleSummary {
   tasks: number;
 }
 
+// Sunucu alıcısı (/demo/buy) ve Phantom akışının ortak adım biçimi.
+export interface BuyStep {
+  t: number;
+  kind: string;
+  detail: Record<string, unknown>;
+}
+export interface ServerBuyResult {
+  ok: boolean;
+  status: number;
+  steps: BuyStep[];
+  jobId?: string;
+  transaction?: string;
+  payer?: string;
+  error?: string;
+  uncertain?: boolean;
+}
+
 export const api = {
   health: () => req<{ ok: boolean }>("/health"),
   cbom: () => req<{ components?: unknown[]; metadata?: unknown }>("/cbom"),
@@ -107,6 +124,7 @@ export const api = {
   replicas: (id: string) => req<Replica[]>(`/jobs/${id}/replicas`),
   modules: () => req<{ bundleHash: string; modules: unknown[] }>("/modules"),
   demoInfo: () => req<DemoInfo>("/demo/info"),
+  demoBuy: (dag: unknown, query = "") => req<ServerBuyResult>(`/demo/buy${query}`, { method: "POST", body: JSON.stringify(dag) }),
 
   agent: {
     info: () => req<AgentInfo>("/agent/info"),

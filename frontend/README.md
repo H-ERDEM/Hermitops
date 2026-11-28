@@ -33,12 +33,23 @@ genişletilecek (Faz 3). O zamana kadar sayfalar `next dev` ile denenir.
 
 | Faz | Durum |
 |---|---|
-| 0 — iskelet, API/pay/hook katmanı, landing | ✅ bu commit |
-| 1 — `/panel` (alıcı + Phantom) | ⏳ |
-| 2 — `/kontrol` (ajan + graf) | ⏳ |
-| 3 — `static.ts` export sunumu, eski HTML emekli | ⏳ |
-| 5 — `/` gönüllü (Web Worker + WASM) | ⏳ |
-| 6 — Dockerfile + compose | ⏳ |
+| 0 — iskelet, API/pay/hook katmanı | ✅ |
+| 1 — `/panel` (alıcı + Phantom/sunucu ödeme, teklif, iş izleme) | ✅ |
+| 2 — `/kontrol` (ajan planlayıcı + DAG graf + onay + iş/hileci izleme) | ✅ |
+| 3 — `static.ts` Next `out/` sunumu (coordinator same-origin) | ✅ |
+| 4 — `/benchmark` (WASM vs JS) | ✅ |
+| 5 — `/` gönüllü (Web Worker + WASM; `/worker.js` + `/pkg`) | ✅ |
+| 6 — Dockerfile + compose + CI imaj | ⏳ |
+
+> **Not:** Eski kök HTML/JS (`volunteer.html`, `panel.html`, `kontrol.html`, `index.html`,
+> `worker.js` …) geçiş döneminde korunur — coordinator e2e testleri (`test/e2e.mjs`,
+> `test/volunteer-e2e.mjs`) bunları açık adla çeker. Next UI `/`, `/panel`, `/kontrol`'ü sunar;
+> eski dosyalar yalnızca açık `.html`/`.js` adıyla erişilir. Tam silme, e2e'ler Playwright ile Next
+> sayfalarına taşınınca yapılacak. `js-baseline.js` ve `vectors.js` backend oracle'ında da kullanıldığı
+> için kalıcıdır.
+>
+> **Üretimde UI'yı görmek için** önce `npm run build:web` (kökten), sonra `npm run coordinator`;
+> coordinator `frontend/out`'u same-origin sunar.
 
 ## Ortam değişkenleri
 

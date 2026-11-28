@@ -116,8 +116,7 @@ export function httpHandler(coord: Coordinator, payments: JobPayments | null = n
         }
       }
       if (req.method === "GET" && url.pathname === "/workers") return send(res, 200, coord.listWorkers());
-      if (req.method === "GET" && url.pathname === "/panel" && (await serveStatic("/panel.html", res))) return;
-      if (req.method === "GET" && url.pathname === "/kontrol" && (await serveStatic("/kontrol.html", res))) return;
+      // /panel ve /kontrol artık Next statik export'undan (frontend/out) sondaki serveStatic ile sunulur.
       const rep = url.pathname.match(/^\/jobs\/([A-Za-z0-9_-]+)\/replicas$/);
       if (req.method === "GET" && rep) {
         const rows = coord.jobReplicas(rep[1]);

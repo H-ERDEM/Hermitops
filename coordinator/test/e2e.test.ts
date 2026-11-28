@@ -5,6 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { createServer } from "../src/server.ts";
 import type { Config } from "../src/config.ts";
 import { readShared } from "../src/config.ts";
@@ -227,10 +228,16 @@ test("status {available:false} gönderen worker'a görev atanmaz; true gelince a
 
 test("statik sunum: / gönüllü sayfasını verir, kaynak kod ve dizin gezintisi kapalı", () =>
   withServer(FAST, async (s) => {
+    // / artık Next statik export'undan (frontend/out) gönüllü sayfasını sunar; yalnızca derlenmişse.
     const root = await fetch(`${s.url}/`);
-    assert.equal(root.status, 200);
-    assert.match(root.headers.get("content-type")!, /text\/html/);
-    assert.match(await root.text(), /Gönüllü hesaplama/);
+    if (existsSync(new URL("../../frontend/out/index.html", import.meta.url))) {
+      assert.equal(root.status, 200);
+      assert.match(root.headers.get("content-type")!, /text\/html/);
+      assert.match(await root.text(), /Gönüllü/);
+    } else {
+      assert.equal(root.status, 404); // UI derlenmemiş (npm run build:web)
+    }
+    // Eski kök script'i (geçiş dönemi) her hâlükârda sunulur.
     const js = await fetch(`${s.url}/volunteer.js`);
     assert.match(js.headers.get("content-type")!, /javascript/);
     for (const p of ["/package.json", "/coordinator/src/server.ts", "/src/lib.rs", "/..%2Fpackage.json", "/pkg/../package.json", "/.git/config"]) {

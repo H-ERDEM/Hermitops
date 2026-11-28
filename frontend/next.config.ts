@@ -24,6 +24,7 @@ const API_PATHS = [
   "agent/:path*",
   "demo/:path*",
   "solana-rpc",
+  "pkg/:path*",
 ];
 
 const nextConfig: NextConfig = {
