@@ -19,6 +19,32 @@ function isLoopback(req: IncomingMessage): boolean {
   return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
 }
 
+/**
+ * Tarayıcıdan gelen siteler-arası (drive-by/CSRF) istek mi? `isLoopback` tek başına yetmez:
+ * kullanıcının tarayıcısında açtığı kötü niyetli bir sayfa da 127.0.0.1'e bağlanır, yani
+ * loopback'ten görünür. Sec-Fetch-Site (tarayıcı denetimli, taklit edilemez) ve Origin ile
+ * başka bir kaynaktan tetiklenen istekleri eleriz. Tarayıcı olmayan istemciler (curl, CLI,
+ * node fetch) bu başlıkları göndermez ve geçer.
+ */
+function crossSiteBrowserRequest(req: IncomingMessage): boolean {
+  const site = req.headers["sec-fetch-site"];
+  if (typeof site === "string") return site !== "same-origin" && site !== "none";
+  const origin = req.headers["origin"];
+  if (typeof origin === "string" && origin.length > 0) {
+    try {
+      return new URL(origin).host !== (req.headers["host"] ?? "");
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Para harcayan ve gizli (alıcı anahtarı, LLM, görev metni) uçlar için güven kontrolü. */
+function trustedLocalCaller(req: IncomingMessage): boolean {
+  return isLoopback(req) && !crossSiteBrowserRequest(req);
+}
+
 const MAX_BODY = 1024 * 1024;
 
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -106,12 +132,12 @@ export function httpHandler(coord: Coordinator, payments: JobPayments | null = n
         const pm = url.pathname.match(/^\/agent\/plans\/([A-Za-z0-9_-]+)$/);
         if (req.method === "GET" && pm) {
           // Plan, kullanıcının görev metnini içerir: yalnızca koordinatörün makinesinden okunur.
-          if (!isLoopback(req)) return send(res, 403, { error: "plan yalnızca koordinatörün çalıştığı makineden okunabilir" });
+          if (!trustedLocalCaller(req)) return send(res, 403, { error: "plan yalnızca koordinatörün çalıştığı makineden okunabilir" });
           const plan = agent.get(pm[1]);
           return plan ? send(res, 200, plan) : send(res, 404, { error: "plan bulunamadı" });
         }
         if (req.method === "POST" && (url.pathname === "/agent/plan" || url.pathname === "/agent/approve")) {
-          if (!isLoopback(req)) return send(res, 403, { error: "ajan yalnızca koordinatörün çalıştığı makineden kullanılabilir" });
+          if (!trustedLocalCaller(req)) return send(res, 403, { error: "ajan yalnızca koordinatörün çalıştığı makineden kullanılabilir" });
           let body: Record<string, unknown>;
           try {
             body = JSON.parse(await readBody(req)) ?? {};
@@ -148,12 +174,20 @@ export function httpHandler(coord: Coordinator, payments: JobPayments | null = n
             }
             const q = new URLSearchParams({ ...plan.options, source: "agent" });
             const r = await demo.buyer.buy(plan.dag, `?${q}`, BigInt(plan.maxAtomic));
-            if (r.ok && r.jobId) agent.markPaid(plan.planId, r.jobId);
-            else agent.release(plan.planId);
-            return send(res, r.ok ? 201 : r.status, r);
-          } catch (e) {
+            if (r.ok && r.jobId) {
+              agent.markPaid(plan.planId, r.jobId);
+              return send(res, 201, r);
+            }
+            // Belirsiz sonuç (ödeme imzalandı ama kesinleşme doğrulanamadı): planı serbest BIRAKMA.
+            // Yeniden onay 409 "busy" ile reddedilir; aksi halde zincirde kesinleşmiş olabilecek
+            // ödeme ikinci kez yapılıp çift ücretlendirme olur. Kesin başarısızlıkta serbest bırak.
+            if (r.uncertain) return send(res, 502, { ...r, error: r.error ?? "ödeme durumu belirsiz; tekrar denemeden önce zinciri kontrol edin" });
             agent.release(plan.planId);
-            throw e;
+            return send(res, r.status, r);
+          } catch (e) {
+            // İstisna = belirsiz sonuç: planı kilitli bırakıp çift ödemeyi önlüyoruz.
+            coord.db.log("error", "agent_approve_uncertain", { planId: plan.planId, message: String(e) });
+            return send(res, 502, { ok: false, uncertain: true, error: "ödeme durumu belirsiz; tekrar denemeden önce zinciri kontrol edin" });
           }
         }
         return send(res, 404, { error: "bulunamadı" });
@@ -191,7 +225,7 @@ export function httpHandler(coord: Coordinator, payments: JobPayments | null = n
       }
       if (req.method === "POST" && url.pathname === "/demo/buy") {
         if (!demo.buyer) return send(res, 409, { error: "demo alıcısı kapalı (PAYMENTS=1 ve BUYER_PRIVATE_KEY gerekli)" });
-        if (!isLoopback(req)) return send(res, 403, { error: "demo alıcısı yalnızca koordinatörün çalıştığı makineden kullanılabilir" });
+        if (!trustedLocalCaller(req)) return send(res, 403, { error: "demo alıcısı yalnızca koordinatörün çalıştığı makineden kullanılabilir" });
         let dag: unknown;
         try {
           dag = JSON.parse(await readBody(req));

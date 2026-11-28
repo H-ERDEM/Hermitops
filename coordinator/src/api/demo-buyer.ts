@@ -25,6 +25,11 @@ export interface BuyResult {
   transaction?: string;
   payer?: string;
   error?: string;
+  /**
+   * Ödeme imzalandı ama kesinleşmesi doğrulanamadı (ağ hatası / 5xx). Sonuç belirsizdir:
+   * zincirde kesinleşmiş olabilir. Çağıran bunu yeniden denememeli (çift ödeme riski).
+   */
+  uncertain?: boolean;
 }
 
 /** Bütçe (atomik birim) ile sınırlı ödemeli fetch'i kurar. Gerçek ortamda Devnet anahtarıyla. */
@@ -78,17 +83,21 @@ export class DemoBuyer {
     } catch (e) {
       return { ok: false, status: 500, steps, error: `alıcı anahtarı yüklenemedi: ${(e as Error).message}` };
     }
+    // Ödeme imzalanmış (zincire gönderilmiş olabilir) ama açıkça reddedilmemişse sonuç belirsizdir.
+    const unverifiedPayment = () => steps.some((s) => s.kind === "signed") && !steps.some((s) => s.kind === "rejected");
     let res: Response;
     try {
       res = await f(`${this.baseUrl}/jobs${query}`, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(dag),
       });
     } catch (e) {
-      // İstemci politikası (bütçe, ağ) ödemeyi reddederse buraya düşer; ödeme yapılmamıştır.
-      return { ok: false, status: 402, steps, error: (e as Error).message };
+      // İmzalamadan önce politika (bütçe/ağ) reddederse ödeme yapılmamıştır; imzadan sonra hata
+      // alınırsa ödeme zincirde kesinleşmiş olabilir (belirsiz) — yeniden denenmemeli.
+      const uncertain = unverifiedPayment();
+      return { ok: false, status: uncertain ? 502 : 402, steps, uncertain, error: (e as Error).message };
     }
     const body = (await res.json().catch(() => ({}))) as { jobId?: string; error?: string; payment?: { transaction: string; payer: string } };
-    if (res.status !== 201) return { ok: false, status: res.status, steps, error: body.error ?? `durum ${res.status}` };
+    if (res.status !== 201) return { ok: false, status: res.status, steps, uncertain: unverifiedPayment() && res.status >= 500, error: body.error ?? `durum ${res.status}` };
     step("settled", { transaction: body.payment?.transaction, payer: body.payment?.payer, jobId: body.jobId });
     return { ok: true, status: 201, steps, jobId: body.jobId, transaction: body.payment?.transaction, payer: body.payment?.payer };
   }

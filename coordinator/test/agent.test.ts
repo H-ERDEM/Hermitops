@@ -173,3 +173,31 @@ test("eşzamanlı iki onay: yalnızca biri öder; başarısız ödemeden sonra p
     assert.equal(calls, 2, "ikinci eşzamanlı onay alıcıya ulaşmadı");
     assert.equal((await (await fetch(`${s.url}/agent/plans/${plan.planId}`)).json()).jobId, "job_sahte");
   }));
+
+test("belirsiz ödeme (uncertain): plan serbest bırakılmaz, yeniden onay 409 ile reddedilir (çift ödeme önlenir)", () =>
+  withServer(null, async (s) => {
+    let calls = 0;
+    s.demo.buyer = {
+      async buy() {
+        calls++;
+        // Ödeme imzalandı ama kesinleşme doğrulanamadı: zincirde kesinleşmiş olabilir.
+        return { ok: false, status: 502, steps: [], uncertain: true, error: "kesinleşme doğrulanamadı" };
+      },
+    } as never;
+    const plan = await (await post(s, "/agent/plan", { prompt: "bir matris çarp", maxUsdc: 1 })).json();
+    const first = await post(s, "/agent/approve", { planId: plan.planId });
+    assert.equal(first.status, 502, "belirsiz ödeme 502 döner");
+    const retry = await post(s, "/agent/approve", { planId: plan.planId });
+    assert.equal(retry.status, 409, "belirsiz ödemeden sonra plan kilitli kalır");
+    assert.equal(calls, 1, "ikinci onay alıcıya ulaşıp ödemeyi tekrar etmez");
+  }));
+
+test("drive-by koruması: siteler-arası tarayıcı isteği (Sec-Fetch-Site/Origin) 403 alır, same-origin geçer", () =>
+  withServer(null, async (s) => {
+    const call = (headers: Record<string, string>) =>
+      fetch(`${s.url}/agent/plan`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ prompt: "bir matris çarp", maxUsdc: 1 }) });
+    assert.equal((await call({ "sec-fetch-site": "cross-site" })).status, 403, "cross-site reddedilir");
+    assert.equal((await call({ origin: "https://kotu.example" })).status, 403, "yabancı Origin reddedilir");
+    assert.equal((await call({ "sec-fetch-site": "same-origin" })).status, 200, "same-origin geçer");
+    assert.equal((await call({})).status, 200, "tarayıcı olmayan istemci (başlıksız) geçer");
+  }));
