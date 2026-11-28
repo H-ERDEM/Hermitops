@@ -104,7 +104,7 @@ export interface JobOptions {
 }
 
 /** İşin kaynağı. Bilinmeyen ya da verilmemiş değer `api` sayılır. */
-export const JOB_SOURCES = ["panel", "cli", "mcp", "api"] as const;
+export const JOB_SOURCES = ["panel", "cli", "mcp", "api", "agent"] as const;
 export type JobSource = (typeof JOB_SOURCES)[number];
 export const jobSource = (s: string | undefined): JobSource =>
   (JOB_SOURCES as readonly string[]).includes(s ?? "") ? (s as JobSource) : "api";
@@ -335,6 +335,29 @@ export class Coordinator {
         };
       }),
     };
+  }
+
+  /**
+   * İşin tüm kopyaları (graf kontrol merkezi: geçmiş atamalar). Gerçek kopyalar `task` alanıyla,
+   * sınama işleri `spot: true` ile döner. Atanmamış (kuyruktaki) kopyalarda `workerId` null'dır.
+   */
+  jobReplicas(jobId: string) {
+    const job = this.jobs.get(jobId);
+    if (!job) return null;
+    const cols = "id, task_id, worker_id, is_spotcheck, state, assigned_at, returned_at, duration_ms, paid";
+    const real = this.db.all(`SELECT ${cols} FROM replicas WHERE task_id LIKE ? AND is_spotcheck = 0 ORDER BY id`, `${jobId}/%`);
+    const spots = job.spotIds.length
+      ? this.db.all(`SELECT ${cols} FROM replicas WHERE id IN (${job.spotIds.map(() => "?").join(",")}) ORDER BY id`, ...job.spotIds)
+      : [];
+    return [...real, ...spots].map((r) => ({
+      replicaId: Number(r.id),
+      task: r.is_spotcheck ? null : String(r.task_id).slice(jobId.length + 1),
+      spot: !!r.is_spotcheck,
+      workerId: (r.worker_id as string | null) ?? null,
+      state: r.state,
+      assignedAt: r.assigned_at, returnedAt: r.returned_at, durationMs: r.duration_ms,
+      paid: !!r.paid,
+    }));
   }
 
   /** Worker listesi; `flagged` yalnızca izleme amaçlıdır (sınama işinde en az bir kez yakalanmış), kara liste yoktur. */

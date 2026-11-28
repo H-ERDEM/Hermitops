@@ -18,6 +18,37 @@ WebAssembly iş akışlarının (DAG) zamanlanması · itibar tabanlı uyarlanab
 
 ---
 
+## Hermitops · Dev3pack Global Hackathon (27–29 Kasım 2026)
+
+**Yapay zekâ ajanları için kullandıkça öde hesaplama.** Ajana doğal dilde görev yazılır. Ajan görevi WebAssembly iş akışına çevirir, grafa çizer ve teklif verir. Kullanıcı onaylayınca ödeme Solana'da x402 ile yapılır. Görevler gönüllülerin tarayıcılarında çalışır, hileli sonuçlar sınama işlerinde yakalanır. Worker'lara yalnızca doğrulanmış sonuçlar için USDC ödenir, kalan tutar alıcıya iade edilir.
+
+**Köken.** Bu repo, dönem projesi [`H-ERDEM/wasm-worker-proto`](https://github.com/H-ERDEM/wasm-worker-proto) üzerine kuruludur. Hackathon öncesindeki hâl, 27 Kasım 22:10 tarihli ilk içerik commit'idir: [`719d190`](https://github.com/H-ERDEM/Hermitops/tree/719d190). Hackathon sırasında eklenenlerin tamamı [`719d190...main`](https://github.com/H-ERDEM/Hermitops/compare/719d190...main) karşılaştırmasında görülür.
+
+### Hackathon sırasında eklenenler
+
+| Özellik | Nerede |
+|---|---|
+| **Graf kontrol merkezi:** cüzdan, ajan, emanet, iş akışı ve worker'lar tek canlı grafta; ödeme kenarları Solana Explorer'a bağlı | [`kontrol.html`](kontrol.html), `GET /kontrol` |
+| **Yapay zekâ ajanı:** doğal dil → DAG (Claude ya da kural tabanlı yedek), şema doğrulaması, teklif ve bütçe kontrolü, onaylı ödeme | [`coordinator/src/agent/planner.ts`](coordinator/src/agent/planner.ts), `POST /agent/plan`, `POST /agent/approve` |
+| **Phantom ile x402 ödemesi:** alıcı ödemeyi tarayıcıda kendi cüzdanıyla imzalar | [`coordinator/web/pay-entry.js`](coordinator/web/pay-entry.js), [arayüz sözleşmesi](docs/arayuz-sozlesmesi-phantom.md) |
+| **Phantom ile gönüllü cüzdanı:** worker ödeme adresi tek tıkla | [`volunteer.js`](volunteer.js) |
+| **Geçmiş atamalar:** işin tüm kopyaları ve sınama işleri | `GET /jobs/:id/replicas` |
+| **Kriptografik envanter (CBOM):** Rust'ta üretilen CycloneDX 1.6 | [`src/cbom.rs`](src/cbom.rs), [`docs/cbom.md`](docs/cbom.md), `GET /cbom` |
+
+### Hızlı deneme
+
+```bash
+npm ci && npm run build && npm run build:pay        # WASM paketi ve Phantom ödeme modülü
+ANTHROPIC_API_KEY=... npm run coordinator             # anahtar yoksa ajan kural tabanlı çalışır
+# Tarayıcıda: http://127.0.0.1:8787/kontrol   (gönüllü sayfası: http://127.0.0.1:8787/)
+```
+
+Ödemeli akış için `PAYMENTS=1 PAYOUTS=1 npm run coordinator` kullanılır. Gerekli Devnet anahtarları [`payments/x402-proto/.env.example`](payments/x402-proto/.env.example) dosyasında açıklanmıştır. Ajan uç noktaları yalnızca koordinatörün çalıştığı makineden çağrılabilir. Bunun iki nedeni var: LLM maliyeti ve sunucudaki alıcı anahtarı.
+
+**Demo videosu:** _[bağlantı eklenecek]_
+
+---
+
 ## Genel bakış
 
 Gönüllüler bir web sayfasını açıp onay vererek bilgisayarlarının ya da telefonlarının işlem gücünü paylaşır; **kurulum gerekmez**. İşler, Rust'tan derlenmiş WebAssembly görevlerinden oluşan iş akışlarıdır (DAG). Bir **koordinatör** görevleri tarayıcılara dağıtır, sonuçları **itibar tabanlı uyarlanabilir replikasyon** ve **sınama işleriyle** doğrular. Alıcı işi **x402** ile Solana Devnet USDC ödeyerek satın alır; iş bitince doğrulanmış her sonuç için worker'a ödeme yapılır, kalan tutar alıcıya iade edilir. Platform, **MCP** sunucusu üzerinden yapay zekâ ajanlarına da açıktır. Farklı zamanlama ve doğrulama stratejileri bir **SimPy simülatöründe** ve gerçek tarayıcılarda karşılaştırılır.
@@ -35,7 +66,8 @@ Gönüllüler bir web sayfasını açıp onay vererek bilgisayarlarının ya da 
 | x402 ile iş satın alma, worker ödemeleri ve iade (Solana Devnet) | ✅ Tamamlandı |
 | MCP sunucusu (Claude masaüstü ve MCP Inspector ile denendi) | ✅ Tamamlandı |
 | SimPy simülatörü ve ilk karşılaştırma grafikleri | ✅ Tamamlandı |
-| Doğal dilden DAG üreten yapay zekâ ajanı | 🚧 Geliştiriliyor |
+| Doğal dilden DAG üreten yapay zekâ ajanı ve graf kontrol merkezi | ✅ Tamamlandı (hackathon) |
+| Phantom ile cüzdan bağlama ve tarayıcıda x402 ödemesi | ✅ Tamamlandı (hackathon) |
 | Gerçek tarayıcı deney matrisi, analiz ve final raporu | 🚧 Planlandı |
 
 Ayrıntılı ilerleme ve karar kaydı: [`docs/ROADMAP.md`](docs/ROADMAP.md).

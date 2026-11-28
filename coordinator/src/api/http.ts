@@ -9,6 +9,7 @@ import { REPO_ROOT } from "../config.ts";
 import type { DemoBuyer } from "./demo-buyer.ts";
 import type { PayoutService } from "../payouts.ts";
 import { serveStatic } from "./static.ts";
+import type { AgentPlanner } from "../agent/planner.ts";
 
 const EXAMPLES_DIR = join(REPO_ROOT, "shared", "examples");
 
@@ -65,8 +66,16 @@ function readBody(req: IncomingMessage): Promise<string> {
  *   GET  /events?since=<id>     koordinatör olay kaydı (log tablosu), en fazla 200 satır
  *   GET  /demo/info             ödeme ve alıcı bilgisi
  *   POST /demo/buy?verifier=&scheduler=&maxUsdc=   gövde: DAG v0; alıcı x402 ile öder (yalnızca aynı makineden)
+ * Ajan ve graf kontrol merkezi (hackathon):
+ *   GET  /kontrol               kontrol.html
+ *   GET  /jobs/:id/replicas     işin tüm kopyaları (geçmiş atamalar, sınama işleri)
+ *   GET  /agent/info            { llm, buyerAvailable }
+ *   POST /agent/plan            gövde: { prompt, maxUsdc, scheduler?, verifier? } → plan (DAG + teklif), ödeme yok
+ *   GET  /agent/plans/:id       kayıtlı plan
+ *   POST /agent/approve         gövde: { planId } → demo alıcısıyla x402 ödemesi, source=agent
+ *   /agent/plan ve /agent/approve yalnızca aynı makineden (LLM maliyeti ve alıcı anahtarı).
  */
-export function httpHandler(coord: Coordinator, payments: JobPayments | null = null, demo: { buyer: DemoBuyer | null; listensOnAll?: boolean; payouts?: PayoutService | null } = { buyer: null }) {
+export function httpHandler(coord: Coordinator, payments: JobPayments | null = null, demo: { buyer: DemoBuyer | null; listensOnAll?: boolean; payouts?: PayoutService | null; agent?: AgentPlanner | null } = { buyer: null }) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
@@ -82,6 +91,61 @@ export function httpHandler(coord: Coordinator, payments: JobPayments | null = n
       }
       if (req.method === "GET" && url.pathname === "/workers") return send(res, 200, coord.listWorkers());
       if (req.method === "GET" && url.pathname === "/panel" && (await serveStatic("/panel.html", res))) return;
+      if (req.method === "GET" && url.pathname === "/kontrol" && (await serveStatic("/kontrol.html", res))) return;
+      const rep = url.pathname.match(/^\/jobs\/([A-Za-z0-9_-]+)\/replicas$/);
+      if (req.method === "GET" && rep) {
+        const rows = coord.jobReplicas(rep[1]);
+        return rows ? send(res, 200, rows) : send(res, 404, { error: "iş bulunamadı" });
+      }
+      if (url.pathname.startsWith("/agent/")) {
+        const agent = demo.agent;
+        if (!agent) return send(res, 409, { error: "ajan kapalı" });
+        if (req.method === "GET" && url.pathname === "/agent/info") {
+          return send(res, 200, { llm: agent.usesLlm, buyerAvailable: !!demo.buyer && isLoopback(req), local: isLoopback(req) });
+        }
+        const pm = url.pathname.match(/^\/agent\/plans\/([A-Za-z0-9_-]+)$/);
+        if (req.method === "GET" && pm) {
+          const plan = agent.get(pm[1]);
+          return plan ? send(res, 200, plan) : send(res, 404, { error: "plan bulunamadı" });
+        }
+        if (req.method === "POST" && (url.pathname === "/agent/plan" || url.pathname === "/agent/approve")) {
+          if (!isLoopback(req)) return send(res, 403, { error: "ajan yalnızca koordinatörün çalıştığı makineden kullanılabilir" });
+          let body: Record<string, unknown>;
+          try {
+            body = JSON.parse(await readBody(req)) ?? {};
+          } catch (e) {
+            return send(res, 400, { error: e instanceof Error ? e.message : "geçersiz JSON" });
+          }
+          if (url.pathname === "/agent/plan") {
+            try {
+              const plan = await agent.plan(String(body.prompt ?? ""), Number(body.maxUsdc ?? 0.1), {
+                scheduler: typeof body.scheduler === "string" ? body.scheduler : undefined,
+                verifier: typeof body.verifier === "string" ? body.verifier : undefined,
+              });
+              return send(res, 200, plan);
+            } catch (e) {
+              if (e instanceof DagError) return send(res, 400, { error: e.message });
+              throw e;
+            }
+          }
+          const plan = agent.get(String(body.planId ?? ""));
+          if (!plan) return send(res, 404, { error: "plan bulunamadı" });
+          if (plan.jobId) return send(res, 409, { error: "plan zaten ödendi", jobId: plan.jobId });
+          if (!plan.withinBudget) return send(res, 409, { error: `üst sınır ${plan.quote.cap} USDC bütçeyi (${plan.maxUsdc} USDC) aşıyor` });
+          if (!demo.buyer) {
+            // Ödeme kapalıysa (PAYMENTS yok) iş doğrudan gönderilir: geliştirme ve demo provası için.
+            if (payments) return send(res, 409, { error: "sunucu alıcısı kapalı; tarayıcıdan Phantom ile ödeyin" });
+            const { jobId } = coord.submitJob(plan.dag, { ...plan.options, source: "agent" });
+            agent.markPaid(plan.planId, jobId);
+            return send(res, 201, { ok: true, jobId, paid: false });
+          }
+          const q = new URLSearchParams({ ...plan.options, source: "agent" });
+          const r = await demo.buyer.buy(plan.dag, `?${q}`, BigInt(plan.maxAtomic));
+          if (r.ok && r.jobId) agent.markPaid(plan.planId, r.jobId);
+          return send(res, r.ok ? 201 : r.status, r);
+        }
+        return send(res, 404, { error: "bulunamadı" });
+      }
       if (req.method === "GET" && url.pathname === "/examples") {
         const files = (await readdir(EXAMPLES_DIR)).filter((f) => f.endsWith(".json")).sort();
         const list = await Promise.all(files.map(async (f) => {

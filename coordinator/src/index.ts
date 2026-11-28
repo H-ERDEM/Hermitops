@@ -4,11 +4,18 @@ import { createServer } from "./server.ts";
 import { devnetPayingFetch } from "./api/demo-buyer.ts";
 import { DEVNET_RPC_URL, solanaChain } from "./solana-chain.ts";
 import { DEVNET_USDC_MINT } from "../../payments/x402-proto/src/config.ts";
+import { anthropicLlmFromEnv } from "./agent/planner.ts";
 
 // Kullanım: npm run coordinator   (PORT, HOST, DB_PATH ortam değişkenleriyle)
 // Telefon gibi aynı ağdaki cihazlar için HOST=0.0.0.0 verin.
 // PAYMENTS=1 ile POST /jobs x402 ödemesinin arkasına alınır: PLATFORM_ADDRESS (ve isteğe bağlı
 // FACILITATOR_URL) payments/x402-proto/.env dosyasından ya da ortamdan okunur.
+// Ajan için LLM anahtarı (ANTHROPIC_API_KEY, isteğe bağlı AGENT_MODEL) kökteki .env'den de okunabilir.
+try {
+  process.loadEnvFile(fileURLToPath(new URL("../../.env", import.meta.url)));
+} catch {
+  /* kökte .env yoksa sorun değil */
+}
 const paymentsOn = process.env.PAYMENTS === "1";
 if (paymentsOn) {
   try {
@@ -40,6 +47,7 @@ const server = await createServer({
   demoBuyer: paymentsOn && process.env.BUYER_PRIVATE_KEY
     ? { payingFetch: devnetPayingFetch, address: process.env.BUYER_ADDRESS ?? null }
     : undefined,
+  agentLlm: anthropicLlmFromEnv(),
 });
 console.log(`Koordinatör çalışıyor: ${server.url}  (worker WebSocket: ${server.wsUrl})`);
 console.log(`Varsayılan zamanlayıcı: ${server.coord.scheduler.name}, doğrulayıcı: ${server.coord.verifier.name} (iş başına ?scheduler=&verifier= ile değişir)`);
@@ -52,6 +60,7 @@ if (server.payments) {
     ? `Worker ödemeleri: açık (Devnet, ${process.env.RPC_URL ?? DEVNET_RPC_URL}; platform cüzdanından)`
     : "Worker ödemeleri: plan yazılır, gönderim kapalı (PAYOUTS=1 ile açılır)");
 }
+console.log(`Kontrol merkezi: ${server.url}/kontrol  (ajan: ${server.agent.usesLlm ? `LLM, ${process.env.AGENT_MODEL ?? "claude-sonnet-5-5"}` : "kural tabanlı; LLM için ANTHROPIC_API_KEY"})`);
 console.log(`Demo paneli: ${server.url}/panel` + (server.demo.buyer ? " (alıcı hazır; yalnızca bu makineden ödeme yapar)" : ""));
 
 const shutdown = async () => {
