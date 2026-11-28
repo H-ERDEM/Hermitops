@@ -246,6 +246,27 @@ export function httpHandler(coord: Coordinator, payments: JobPayments | null = n
       if (req.method === "GET" && url.pathname === "/modules") {
         return send(res, 200, { bundleHash: coord.wasmHash, modules: coord.modules });
       }
+      if (req.method === "POST" && url.pathname === "/solana-rpc") {
+        // Phantom ödeme akışı (pay-entry.js), ödeme yükünü kurarken Devnet RPC'ye erişir (mint/token
+        // programı ve blockhash). Tarayıcıdan doğrudan public RPC'ye erişim CORS/rate-limit'e takılıp
+        // "Failed to fetch" verir. Bu same-origin vekil isteği SABİT Devnet RPC'ye iletir (yalnızca
+        // okuma; hedef istemciden alınmaz, SSRF yok). Üst akış hatasında 502 döner.
+        const target = process.env.SOLANA_RPC_URL || process.env.RPC_URL || "https://api.devnet.solana.com";
+        let body: string;
+        try {
+          body = await readBody(req);
+        } catch (e) {
+          return send(res, 400, { error: e instanceof Error ? e.message : "geçersiz gövde" });
+        }
+        try {
+          const upstream = await fetch(target, { method: "POST", headers: { "content-type": "application/json" }, body });
+          const text = await upstream.text();
+          res.writeHead(upstream.status, { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" });
+          return res.end(text);
+        } catch (e) {
+          return send(res, 502, { error: `Devnet RPC'ye ulaşılamadı: ${e instanceof Error ? e.message : String(e)}` });
+        }
+      }
       if (req.method === "POST" && (url.pathname === "/jobs" || url.pathname === "/quote")) {
         let dag: unknown;
         try {
