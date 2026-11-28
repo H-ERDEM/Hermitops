@@ -105,6 +105,8 @@ export function httpHandler(coord: Coordinator, payments: JobPayments | null = n
         }
         const pm = url.pathname.match(/^\/agent\/plans\/([A-Za-z0-9_-]+)$/);
         if (req.method === "GET" && pm) {
+          // Plan, kullanıcının görev metnini içerir: yalnızca koordinatörün makinesinden okunur.
+          if (!isLoopback(req)) return send(res, 403, { error: "plan yalnızca koordinatörün çalıştığı makineden okunabilir" });
           const plan = agent.get(pm[1]);
           return plan ? send(res, 200, plan) : send(res, 404, { error: "plan bulunamadı" });
         }
@@ -128,21 +130,31 @@ export function httpHandler(coord: Coordinator, payments: JobPayments | null = n
               throw e;
             }
           }
-          const plan = agent.get(String(body.planId ?? ""));
-          if (!plan) return send(res, 404, { error: "plan bulunamadı" });
-          if (plan.jobId) return send(res, 409, { error: "plan zaten ödendi", jobId: plan.jobId });
-          if (!plan.withinBudget) return send(res, 409, { error: `üst sınır ${plan.quote.cap} USDC bütçeyi (${plan.maxUsdc} USDC) aşıyor` });
-          if (!demo.buyer) {
-            // Ödeme kapalıysa (PAYMENTS yok) iş doğrudan gönderilir: geliştirme ve demo provası için.
-            if (payments) return send(res, 409, { error: "sunucu alıcısı kapalı; tarayıcıdan Phantom ile ödeyin" });
-            const { jobId } = coord.submitJob(plan.dag, { ...plan.options, source: "agent" });
-            agent.markPaid(plan.planId, jobId);
-            return send(res, 201, { ok: true, jobId, paid: false });
+          const planId = String(body.planId ?? "");
+          const existing = agent.get(planId);
+          if (!existing) return send(res, 404, { error: "plan bulunamadı" });
+          if (!existing.withinBudget) return send(res, 409, { error: `üst sınır ${existing.quote.cap} USDC bütçeyi (${existing.maxUsdc} USDC) aşıyor` });
+          if (!demo.buyer && payments) return send(res, 409, { error: "sunucu alıcısı kapalı; tarayıcıdan Phantom ile ödeyin" });
+          // Kontrol ile işaretleme arasında await yok: eşzamanlı ikinci onay burada reddedilir.
+          const plan = agent.claim(planId);
+          if (plan === "missing") return send(res, 404, { error: "plan bulunamadı" });
+          if (plan === "busy") return send(res, 409, { error: "plan zaten onaylandı ya da ödemesi sürüyor", jobId: existing.jobId ?? null });
+          try {
+            if (!demo.buyer) {
+              // Ödeme kapalıysa (PAYMENTS yok) iş doğrudan gönderilir: geliştirme ve demo provası için.
+              const { jobId } = coord.submitJob(plan.dag, { ...plan.options, source: "agent" });
+              agent.markPaid(plan.planId, jobId);
+              return send(res, 201, { ok: true, jobId, paid: false });
+            }
+            const q = new URLSearchParams({ ...plan.options, source: "agent" });
+            const r = await demo.buyer.buy(plan.dag, `?${q}`, BigInt(plan.maxAtomic));
+            if (r.ok && r.jobId) agent.markPaid(plan.planId, r.jobId);
+            else agent.release(plan.planId);
+            return send(res, r.ok ? 201 : r.status, r);
+          } catch (e) {
+            agent.release(plan.planId);
+            throw e;
           }
-          const q = new URLSearchParams({ ...plan.options, source: "agent" });
-          const r = await demo.buyer.buy(plan.dag, `?${q}`, BigInt(plan.maxAtomic));
-          if (r.ok && r.jobId) agent.markPaid(plan.planId, r.jobId);
-          return send(res, r.ok ? 201 : r.status, r);
         }
         return send(res, 404, { error: "bulunamadı" });
       }

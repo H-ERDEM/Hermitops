@@ -32,6 +32,9 @@ test("kural planlayıcısı: '3 görsel + matris + özet' → 3 image_blur, 1 ma
   const join = dag.tasks.at(-1)!;
   assert.deepEqual(join.deps, ["img_1", "img_2", "img_3", "mm"]);
   assert.deepEqual(join.input.seed, { $ref: "img_1.output.hash" });
+  // Modüller tek girdi alır: açıklama "birleştirir" demez, özetin ilk sonuçtan çıktığını söyler.
+  assert.doesNotMatch(rulePlan("iki görseli tek özette birleştir").explanation, /birleştir/);
+  assert.match(rulePlan("iki görseli tek özette birleştir").explanation, /ilk sonuçtan, img_1/);
 });
 
 test("kural planlayıcısı: sayı yazıyla ('iki resim') ve anlaşılmayan görev → örnek hat", () => {
@@ -145,4 +148,28 @@ test("ajan uç noktaları: boş görev 400, bilinmeyen plan 404, kontrol sayfas�
     assert.equal(page.status, 200);
     assert.match(await page.text(), /Kontrol Merkezi/);
     assert.ok(readShared("examples/image-pipeline.json"));
+  }));
+
+test("eşzamanlı iki onay: yalnızca biri öder; başarısız ödemeden sonra plan yeniden onaylanabilir", () =>
+  withServer(null, async (s) => {
+    let calls = 0;
+    let fail = true;
+    // Yavaş sahte alıcı: ödeme sürerken ikinci onay gelir.
+    s.demo.buyer = {
+      async buy() {
+        calls++;
+        await new Promise((r) => setTimeout(r, 100));
+        if (fail) return { ok: false, status: 502, steps: [], error: "facilitator yanıt vermedi" };
+        return { ok: true, status: 201, steps: [], jobId: "job_sahte" };
+      },
+    } as never;
+    const plan = await (await post(s, "/agent/plan", { prompt: "bir matris çarp", maxUsdc: 1 })).json();
+    const first = await post(s, "/agent/approve", { planId: plan.planId });
+    assert.equal(first.status, 502, "başarısız ödeme");
+    assert.equal(calls, 1);
+    fail = false;
+    const [a, b] = await Promise.all([post(s, "/agent/approve", { planId: plan.planId }), post(s, "/agent/approve", { planId: plan.planId })]);
+    assert.deepEqual([a.status, b.status].sort(), [201, 409]);
+    assert.equal(calls, 2, "ikinci eşzamanlı onay alıcıya ulaşmadı");
+    assert.equal((await (await fetch(`${s.url}/agent/plans/${plan.planId}`)).json()).jobId, "job_sahte");
   }));

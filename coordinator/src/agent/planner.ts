@@ -33,6 +33,8 @@ export interface Plan {
   createdAt: number;
   /** Onaylanıp ödendiyse işin kimliği. */
   jobId?: string;
+  /** Onay sürüyor (ödeme bekleniyor): aynı plan için ikinci onay reddedilir. */
+  claimed?: boolean;
 }
 
 export const LIMITS = { tasks: 24, wh: 256, passes: 5, n: 128, iterations: 200_000 } as const;
@@ -56,6 +58,23 @@ export class AgentPlanner {
 
   get(planId: string): Plan | undefined {
     return this.plans.get(planId);
+  }
+
+  /**
+   * Onayı atomik olarak üstlenir: Node tek iş parçacıklı olduğundan bu senkron kontrol-ve-işaretle,
+   * eşzamanlı iki onaydan yalnızca birinin ödemeye geçmesini sağlar. Başarısız ödemede release().
+   */
+  claim(planId: string): Plan | "missing" | "busy" {
+    const p = this.plans.get(planId);
+    if (!p) return "missing";
+    if (p.claimed || p.jobId) return "busy";
+    p.claimed = true;
+    return p;
+  }
+
+  release(planId: string): void {
+    const p = this.plans.get(planId);
+    if (p && !p.jobId) p.claimed = false;
   }
 
   markPaid(planId: string, jobId: string): void {
@@ -141,6 +160,7 @@ function systemPrompt(): string {
     `- matmul {seed:int, n:int ≤${LIMITS.n}}: seed'den üretilen iki n×n tamsayı matrisin çarpımı. Çıktı: {hash}`,
     `- sha_chain {seed:string, iterations:int ≤${LIMITS.iterations}}: SHA-256 hash zinciri; özet/birleştirme için kullanılır. Çıktı: {hash}`,
     'Bir görevin çıktısı başka görevin girdisine {"$ref": "<görevId>.output.hash"} ile bağlanır; o görev deps listesinde olmalıdır.',
+    "Her modül tek bir seed alır: birden çok sonucu tek hash'te birleştiren modül yoktur. Son adım deps ile hepsini bekleyebilir ama özeti yalnızca bir sonuçtan zincirler; açıklamada 'birleştirir' deme.",
     `En fazla ${LIMITS.tasks} görev. Görev kimlikleri kısa, [a-z0-9_] olsun. Bütçe ayrıca kontrol edilir, sen fiyat hesaplama.`,
     'Yanıtın YALNIZCA şu biçimde tek bir JSON nesnesi olsun: {"explanation": "<Türkçe, tek cümle>", "dag": {"version": 0, "jobId": "...", "tasks": [...]}}',
     `Örnek DAG:\n${JSON.stringify(example)}`,
@@ -243,7 +263,9 @@ export function rulePlan(prompt: string): { dag: Dag; explanation: string } {
   } else if (tasks.length > 1 || wantsHash) {
     const deps = tasks.map((x) => x.id);
     tasks.push({ id: "join", module: "sha_chain", input: { seed: { $ref: `${deps[0]}.output.hash` }, iterations: 1 }, deps });
-    parts.push("sonuçları tek özette birleştirme");
+    // WASM modülleri tek girdi alır: son adım tüm sonuçları bekler ama özeti yalnızca ilk sonuçtan
+    // zincirler. Açıklama bunu açıkça söyler (birleştirme modülü kapsam dışı).
+    parts.push(deps.length > 1 ? `tüm sonuçlar bitince çalışan son adım (özet ilk sonuçtan, ${deps[0]})` : "sonucun SHA-256 özeti");
   }
   return {
     dag: { version: 0, jobId: `ajan-${randomUUID().slice(0, 6)}`, tasks },
