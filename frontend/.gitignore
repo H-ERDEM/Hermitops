@@ -1,0 +1,14 @@
+# bağımlılıklar
+/node_modules
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# üretim / tsc
+*.tsbuildinfo
+
+# yerel
+.env*.local
+.DS_Store

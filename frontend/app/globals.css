@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* shadcn/ui token paleti. Vurgu: teal (#0F766E ≈ 175 60% 26%). Açık + koyu tema. */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222 20% 14%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 20% 14%;
+  --primary: 175 70% 26%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 180 10% 96%;
+  --secondary-foreground: 222 20% 20%;
+  --muted: 210 16% 96%;
+  --muted-foreground: 215 14% 42%;
+  --accent: 174 60% 94%;
+  --accent-foreground: 175 70% 22%;
+  --destructive: 0 72% 48%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 18% 90%;
+  --input: 214 18% 90%;
+  --ring: 175 70% 32%;
+  --radius: 0.625rem;
+}
+
+.dark {
+  --background: 222 24% 8%;
+  --foreground: 210 20% 96%;
+  --card: 222 22% 11%;
+  --card-foreground: 210 20% 96%;
+  --primary: 172 65% 44%;
+  --primary-foreground: 222 30% 8%;
+  --secondary: 217 18% 18%;
+  --secondary-foreground: 210 20% 92%;
+  --muted: 217 18% 16%;
+  --muted-foreground: 215 16% 62%;
+  --accent: 175 40% 18%;
+  --accent-foreground: 172 65% 72%;
+  --destructive: 0 62% 52%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 217 18% 20%;
+  --input: 217 18% 22%;
+  --ring: 172 65% 48%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
