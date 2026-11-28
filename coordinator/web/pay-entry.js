@@ -4,6 +4,7 @@
 // başlığını okuyup facilitator'da doğrular/kesinleştirir. Bu modül o başlığı Phantom imzasıyla üretir.
 import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
 import { ExactSvmScheme } from "@x402/svm/exact/client";
+import { decodePaymentRequiredHeader } from "@x402/core/http";
 import { VersionedTransaction, VersionedMessage } from "@solana/web3.js";
 
 // Devnet sabitleri — payments/x402-proto/src/config.ts ile AYNI olmalı (tek kaynak orası; bu
@@ -51,20 +52,48 @@ function phantomSigner(provider, address) {
  */
 export async function hermitPay({ provider, address, maxAtomic, url, body, onStep }) {
   const step = (kind, detail) => { try { onStep?.({ t: Date.now(), kind, detail }); } catch { /* panel yok */ } };
+  // ExactSvmScheme, ödeme yükünü kurarken Devnet RPC'ye erişir (mint/token programı, blockhash).
+  // Varsayılan public RPC (api.devnet.solana.com) tarayıcıdan CORS/rate-limit'e takılıp "Failed to
+  // fetch" verir; koordinatörün same-origin /solana-rpc vekilini kullanırız (sunucu Devnet'e iletir).
+  const rpcUrl = typeof location !== "undefined" ? new URL("/solana-rpc", location.href).href : "https://api.devnet.solana.com";
   const client = new x402Client()
-    .register("solana:*", new ExactSvmScheme(phantomSigner(provider, address)))
+    .register("solana:*", new ExactSvmScheme(phantomSigner(provider, address), { rpcUrl }))
     .registerPolicy(devnetPolicyWithMax(maxAtomic));
   // Her istek/yanıtı panele kaydeden fetch; ödeme sarmalayıcısı bunun üstüne kurulur.
+  // 402'deki PAYMENT-REQUIRED'ı çözüp gerçek tutarı yakalarız: hem panelde gösterilir (yoksa
+  // "NaN USDC" görünür) hem de politika elemesi olursa net bir hata mesajı kurmakta kullanılır.
+  let required = null; // { amountAtomic, payTo }
   const recording = async (input, init) => {
     const req = new Request(input, init);
     const signed = req.headers.has("payment-signature") || req.headers.has("x-payment");
     step(signed ? "signed" : "request", signed ? { header: "PAYMENT-SIGNATURE" } : { method: req.method, path: new URL(req.url).pathname });
     const res = await fetch(req);
-    if (res.status === 402) step(signed ? "rejected" : "payment_required", {});
+    if (res.status === 402) {
+      try {
+        const a = decodePaymentRequiredHeader(res.headers.get("payment-required"))?.accepts?.[0];
+        if (a) required = { amountAtomic: Number(a.amount), payTo: a.payTo };
+      } catch { /* başlık yoksa boş geç */ }
+      step(signed ? "rejected" : "payment_required", required ? { amountAtomic: required.amountAtomic, payTo: required.payTo } : {});
+    }
     return res;
   };
   const payFetch = wrapFetchWithPayment(recording, client);
-  const res = await payFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
+  let res;
+  try {
+    res = await payFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
+  } catch (e) {
+    // En sık hata: işin gerektirdiği tutar bütçeyi aşınca client politikası tüm gereksinimleri eler.
+    // Kriptik "filtered out by policies" yerine ne yapılacağını söyleyen bir mesaj veririz.
+    const msg = String(e?.message ?? e);
+    const fmt = (atomic) => (atomic / 1e6).toLocaleString("tr-TR", { minimumFractionDigits: 6 });
+    if (/filtered out by policies/i.test(msg)) {
+      if (required && required.amountAtomic > Number(maxAtomic)) {
+        throw new Error(`Gerekli tutar ${fmt(required.amountAtomic)} USDC, bütçenizi (${fmt(Number(maxAtomic))} USDC) aşıyor. Bütçeyi en az ${fmt(required.amountAtomic)} USDC yapıp tekrar deneyin.`);
+      }
+      throw new Error("Ödeme gereksinimleri istemci politikasıyla elendi (yalnızca Devnet USDC, en fazla bütçe). Bütçeyi ve ağın Devnet olduğunu kontrol edip tekrar deneyin.");
+    }
+    throw e;
+  }
   const out = await res.json().catch(() => ({}));
   if (res.status === 201) {
     step("settled", { jobId: out.jobId, transaction: out.payment?.transaction, payer: out.payment?.payer });
