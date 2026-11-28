@@ -190,6 +190,108 @@ const ui = {
 const WALLET_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 $("wallet").value = params.get("wallet") ?? storageGet("vc.wallet") ?? "";
 
+// ---------- Phantom (Devnet) cüzdan bağlantısı ----------
+// Faz A: worker yalnızca ödeme ADRESİNİ alır; imza atmaz. Build adımı olmadığı için
+// @solana/wallet-adapter yerine tarayıcıya enjekte edilen sağlayıcı doğrudan kullanılır.
+// Phantom'un açık anahtarı ağdan bağımsızdır; aynı adres Devnet USDC alımı için geçerlidir.
+function phantomProvider() {
+  if (window.phantom?.solana?.isPhantom) return window.phantom.solana;
+  if (window.solana?.isPhantom) return window.solana;
+  return null;
+}
+
+// Phantom sağlayıcısını enjekte etmeden önce tıklanırsa kısa süre bekle (geç enjeksiyon).
+function waitForPhantom(timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const now = phantomProvider();
+    if (now) return resolve(now);
+    const started = Date.now();
+    const iv = setInterval(() => {
+      const p = phantomProvider();
+      if (p || Date.now() - started > timeoutMs) { clearInterval(iv); resolve(p); }
+    }, 100);
+  });
+}
+
+// Sağlayıcı yoksa nedenini daraltmak için ortam tanısı (konsola da yazılır).
+function walletDiag() {
+  const other = Boolean(window.solana && !window.solana.isPhantom);
+  return {
+    host: location.host,
+    phantom: Boolean(window.phantom),
+    solana: Boolean(window.solana),
+    otherWallet: other,
+    secure: window.isSecureContext,
+  };
+}
+
+function walletStatus(text, cls) {
+  const el = $("walletStatus");
+  el.textContent = text;
+  el.className = cls;
+}
+
+function applyWallet(addr) {
+  if (!WALLET_RE.test(addr)) {
+    walletStatus("Phantom beklenmedik bir adres döndürdü.", "err");
+    return;
+  }
+  $("wallet").value = addr;
+  storageSet("vc.wallet", addr);
+  walletStatus(`Phantom bağlı: ${addr.slice(0, 4)}…${addr.slice(-4)} (Devnet)`, "ok");
+}
+
+let phantomBound = false;
+function bindPhantomEvents(provider) {
+  if (phantomBound) return;
+  phantomBound = true;
+  // Kullanıcı Phantom'da hesap değiştirirse ödeme adresini güncelle.
+  provider.on?.("accountChanged", (pk) => {
+    if (pk) applyWallet(pk.toString());
+    else walletStatus("Phantom bağlantısı kesildi; adresi elle girebilirsiniz.", "warn");
+  });
+  provider.on?.("disconnect", () => walletStatus("Phantom bağlantısı kesildi.", "warn"));
+}
+
+async function connectPhantom() {
+  walletStatus("Phantom aranıyor…", "muted");
+  const provider = await waitForPhantom();
+  if (!provider) {
+    const d = walletDiag();
+    console.warn("[phantom] sağlayıcı bulunamadı:", d);
+    walletStatus(
+      d.otherWallet
+        ? "Phantom bulunamadı; başka bir cüzdan eklentisi aktif. Phantom'u etkinleştirip sayfayı yenileyin."
+        : "Phantom bulunamadı — kuruluysa sayfayı http://localhost:8787 adresinden (127.0.0.1 değil) açıp yenileyin; gizli pencere kullanmayın.",
+      "warn");
+    return;
+  }
+  walletStatus("Phantom açılıyor…", "muted");
+  try {
+    const { publicKey } = await provider.connect();
+    applyWallet(publicKey.toString());
+    bindPhantomEvents(provider);
+  } catch (e) {
+    // 4001: kullanıcı isteği reddetti.
+    walletStatus(e?.code === 4001 ? "Bağlantı reddedildi." : `Bağlanılamadı: ${e?.message ?? e}`, "err");
+  }
+}
+
+// Daha önce izin verilmişse adres alanı boşken sessizce doldur (popup açmadan).
+async function eagerConnectPhantom() {
+  if ($("wallet").value.trim()) return;
+  const provider = await waitForPhantom(2000);
+  if (!provider) return;
+  try {
+    const { publicKey } = await provider.connect({ onlyIfTrusted: true });
+    applyWallet(publicKey.toString());
+    bindPhantomEvents(provider);
+  } catch { /* güvenilmiyor ya da Phantom kilitli: sessizce geç */ }
+}
+
+$("connectWallet").addEventListener("click", connectPhantom);
+eagerConnectPhantom();
+
 let volunteer = null;
 function begin() {
   const level = params.get("cpu") ?? $("cpu").value;

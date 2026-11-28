@@ -409,6 +409,7 @@ wasm-worker-proto/
 
 - Ödemeler yalnızca **Solana Devnet**'te (test USDC); birim ücret sabit 0,001 USDC.
 - Görev girdileri worker'a açıktır; gizlilik ve şifreli hesaplama kapsam dışıdır.
+- Demo taşıması TLS'siz (`http://`/`ws://`); dış ağa açılırsa ters vekil arkasında TLS gerekir. Kriptografik envanter ve güven sınırları: [`docs/cbom.md`](docs/cbom.md) — Rust'ta üretilen CycloneDX CBOM ([`src/cbom.rs`](src/cbom.rs) → `npm run build:cbom`), koordinatör `GET /cbom` ile sunar.
 - Modüller tek WASM paketinde; görevler paketin özetine (`moduleHash`) bağlanır, ayrı `.wasm` modülleri yoktur.
 - Sınama işi yakalaması olasılıksaldır: iş bitmeden yakalanmayan tek kopyalı yanlış sonuç geri alınamaz (`late_detection` olarak sayılır).
 - Simülatördeki hız ve oturum dağılımları gerçek tarayıcı ölçümleriyle kalibre edilecek.

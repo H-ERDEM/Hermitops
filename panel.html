@@ -81,6 +81,9 @@
   .jobhead { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin-bottom: 10px; color: var(--ink-2); font-size: 13px; }
   .jobhead b { color: var(--ink); font-size: 16px; }
   .chip { font-size: 12px; border-radius: 999px; padding: 2px 10px; border: 1px solid var(--axis); color: var(--ink-2); white-space: nowrap; }
+  .cbom-badge { font-size: 12px; border-radius: 999px; padding: 2px 10px; border: 1px solid var(--good); color: var(--good-text); text-decoration: none; white-space: nowrap; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+  .cbom-badge:hover { background: color-mix(in srgb, var(--good) 10%, transparent); }
+  .cbom-badge.warn { border-color: var(--axis); color: var(--ink-2); }
   .chip.RUNNING { border-color: var(--blue); color: var(--blue); }
   .chip.COMPLETED { border-color: var(--good); color: var(--good-text); }
   .chip.FAILED { border-color: var(--critical); color: var(--critical); }
@@ -111,6 +114,7 @@
   .badge.off { border: 1px solid var(--axis); color: var(--ink-2); }
   .w .doing { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; min-height: 18px; }
   .w.spot .doing { color: var(--violet); font-weight: 600; }
+  .w .doing .oj { opacity: .7; font-style: italic; }
   .w .rep { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .w .r { height: 6px; border-radius: 3px; background: var(--hair); overflow: hidden; position: relative; }
   .w .r i { display: block; height: 100%; background: var(--ink-2); }
@@ -135,6 +139,7 @@
   <h1>Tarayıcı tabanlı gönüllü hesaplama · canlı demo</h1>
   <div class="join" id="join"></div>
   <div class="conn" id="conn">bağlanıyor…</div>
+  <a class="cbom-badge" id="cbomBadge" href="/cbom" target="_blank" rel="noopener" hidden>🔒 kripto</a>
 </header>
 <main>
   <section class="card buyer">
@@ -148,6 +153,7 @@
     <label class="f" for="budget">Bütçe (USDC)</label>
     <input type="number" id="budget" min="0.001" step="0.01" value="0.1">
     <div class="row2"><button class="btn" id="quoteBtn">Teklif al</button><button class="btn primary" id="payBtn">Öde ve gönder</button></div>
+    <div class="row2"><button class="btn" id="phantomPayBtn" hidden>Phantom ile öde (tarayıcı)</button></div>
     <div class="quote" id="quote" hidden></div>
     <div class="other" id="otherJob" hidden></div>
     <ol class="steps" id="steps" hidden></ol>
@@ -308,10 +314,78 @@
 
   function canPay() { return !info.payment || info.buyerAvailable; }
 
+  // Faz B: alıcı x402 ödemesini TARAYICIDA Phantom ile imzalar (sunucudaki BUYER_PRIVATE_KEY kullanılmaz).
+  // Ödeme modülü pkg/pay.bundle.js'tir (npm run build:pay). Bu uç, sunucudaki /jobs ile aynıdır.
+  function phantomProvider() {
+    if (window.phantom?.solana?.isPhantom) return window.phantom.solana;
+    if (window.solana?.isPhantom) return window.solana;
+    return null;
+  }
+  // Geç enjeksiyon için kısa bekleme (Faz A gönüllü sayfasıyla aynı davranış).
+  function waitForPhantom(timeoutMs = 3000) {
+    return new Promise((resolve) => {
+      const now = phantomProvider();
+      if (now) return resolve(now);
+      const started = Date.now();
+      const iv = setInterval(() => {
+        const p = phantomProvider();
+        if (p || Date.now() - started > timeoutMs) { clearInterval(iv); resolve(p); }
+      }, 100);
+    });
+  }
+  async function phantomPay() {
+    $("buyerHint").textContent = "Phantom aranıyor…";
+    const provider = await waitForPhantom();
+    if (!provider) { $("buyerHint").textContent = "Phantom bulunamadı — kurup Devnet'e geçin, sayfayı http://localhost adresinden açın; gizli pencere kullanmayın."; return; }
+    const btn = $("phantomPayBtn");
+    btn.disabled = true;
+    const steps = [];
+    try {
+      const { publicKey } = await provider.connect();
+      const address = publicKey.toString();
+      let mod;
+      try { mod = await import("/pkg/pay.bundle.js"); }
+      catch { $("buyerHint").textContent = "Phantom ödeme modülü derlenmemiş: npm run build:pay"; return; }
+      const budget = Number($("budget").value);
+      renderSteps([{ kind: "request", t: Date.now(), detail: {} }], true);
+      const out = await mod.hermitPay({
+        provider, address, maxAtomic: BigInt(Math.round(budget * 1e6)),
+        url: `/jobs${selectedQuery()}`, body: JSON.stringify(dag),
+        onStep: (s) => { steps.push(s); renderSteps(steps, true); },
+      });
+      if (out.ok) { renderSteps(steps, false); ownJobId = out.jobId; setJob(out.jobId); }
+      else { renderSteps(steps, false, out.error); $("buyerHint").textContent = `Hata: ${out.error}`; }
+    } catch (e) {
+      $("buyerHint").textContent = e?.code === 4001 ? "Phantom'da reddedildi." : `Ödeme hatası: ${e?.message ?? e}`;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   function setJob(id) {
     if (id === jobId) return;
     jobId = id; jobDone = false;
     $("ledger").hidden = true;
+  }
+
+  // Güven/kripto rozeti: koordinatörün Rust'tan ürettiği CBOM'u (GET /cbom) özetler.
+  async function loadCbomBadge() {
+    const badge = $("cbomBadge");
+    try {
+      const cbom = await (await fetch("/cbom")).json();
+      if (!cbom || !cbom.components) throw new Error("boş");
+      const assets = cbom.components.filter((c) => c.type === "cryptographic-asset");
+      // Başlıkta en anlamlı üçlü: imza, özet, protokol; CSPRNG ve anahtar materyali sona.
+      const rank = (c) => { const p = c.cryptoProperties?.algorithmProperties?.primitive; if (p === "signature") return 0; if (p === "hash") return 1; if (c.cryptoProperties?.assetType === "protocol") return 2; return 9; };
+      const algos = assets.filter((c) => ["algorithm", "protocol"].includes(c.cryptoProperties?.assetType)).sort((a, b) => rank(a) - rank(b)).map((c) => c.name);
+      const tls = (cbom.metadata?.properties || []).find((p) => p.name === "cbom:transport");
+      badge.textContent = `🔒 ${algos.slice(0, 3).join(" · ")}`;
+      badge.title = `Kriptografik envanter (CycloneDX CBOM, Rust ile üretilir)\n${assets.map((c) => "• " + c.name).join("\n")}\n\n${tls ? tls.value : ""}\nTıkla: tam CBOM (/cbom)`;
+      badge.hidden = false;
+    } catch {
+      // CBOM üretilmemişse (npm run build:cbom) rozeti sessizce gösterme.
+      badge.hidden = true;
+    }
   }
 
   // ---------- İş (DAG çizimi) ----------
@@ -486,14 +560,18 @@
       if (w.caught) badges.append(el("span", "badge caught", w.caught > 1 ? `yakalandı ×${w.caught}` : "yakalandı"));
       if (!w.available) badges.append(el("span", "badge off", "duraklatıldı"));
       top.append(badges);
-      const doing = flashing ? "sınama işinde yakalandı" : w.doing ? (w.doing.spot ? "sınama işi (cevabı bilinen görev)" : `${w.doing.module} · ${w.doing.task}`) : "boşta";
+      // Worker gösterilen işten BAŞKA bir işin görevindeyse bunu belirt (görev id'si ekrandaki DAG'de yoktur).
+      const onOtherJob = Boolean(w.doing && !w.doing.spot && w.doing.jobId && jobId && w.doing.jobId !== jobId);
+      const doingText = flashing ? "sınama işinde yakalandı" : w.doing ? (w.doing.spot ? "sınama işi (cevabı bilinen görev)" : `${w.doing.module} · ${w.doing.task}`) : "boşta";
+      const doingEl = el("div", "doing", doingText);
+      if (onOtherJob) doingEl.append(el("span", "oj", ` · başka iş ${short(w.doing.jobId)}`));
       const rep = el("div", "rep");
       const r = el("div", "r");
       const fill = el("i"); fill.style.width = `${(w.reputation * 100).toFixed(1)}%`;
       const tau = el("span", "tau"); tau.style.left = `${TAU * 100}%`; tau.title = "τ = 0,95";
       r.append(fill, tau);
       rep.append(r, el("span", "", `R ${w.reputation.toFixed(3)} · α ${w.alpha.toFixed(1)} · β ${w.beta.toFixed(1)}`));
-      card.append(top, el("div", "doing", doing), rep);
+      card.append(top, doingEl, rep);
       box.append(card);
     }
   }
@@ -603,6 +681,9 @@
     }
     $("quoteBtn").onclick = getQuote;
     $("payBtn").onclick = pay;
+    $("phantomPayBtn").onclick = phantomPay;
+    // Tarayıcıda Phantom ile ödeme, sunucu alıcı anahtarından bağımsızdır: ödeme açıkken daima sunulur.
+    if (info.payment) $("phantomPayBtn").hidden = false;
     if (!info.payment) {
       $("payBtn").textContent = "Gönder (ödemesiz)";
       $("buyerHint").textContent = "Koordinatörde ödeme kapalı. Ödemeli demo için: PAYMENTS=1 npm run coordinator";
@@ -620,6 +701,7 @@
     $("join").textContent = "";
     if (urls.length) $("join").append("Gönüllü olmak için telefonda açın: ", el("b", "", urls.join("  ·  ")));
     else $("join").append("Gönüllü sayfası: ", el("b", "", `${location.origin}/`));
+    loadCbomBadge();
     tick();
   }
   init();

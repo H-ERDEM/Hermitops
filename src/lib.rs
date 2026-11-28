@@ -6,6 +6,7 @@
 
 use wasm_bindgen::prelude::*;
 
+pub mod cbom;
 pub mod image_blur;
 pub mod matmul;
 pub mod sha_chain;
@@ -32,6 +33,12 @@ pub fn run_task(module: &str, input_json: &str) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn list_modules() -> Vec<String> {
     vec!["sha_chain".to_string(), "matmul".to_string(), "image_blur".to_string()]
+}
+
+/// Kriptografik envanter (CycloneDX 1.6 CBOM) JSON'u. Tarayıcıdan da çağrılabilir.
+#[wasm_bindgen]
+pub fn cbom_json() -> String {
+    cbom::cbom_json()
 }
 
 #[cfg(test)]

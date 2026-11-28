@@ -50,6 +50,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 /**
  * HTTP API.
  *   GET  /health
+ *   GET  /cbom, /cbom.json   kriptografik envanter (CycloneDX CBOM; kaynak: Rust, src/cbom.rs)
  *   POST /quote       gövde: DAG v0  → 200 { quote, payment? }  (iş oluşturmaz, ödeme istemez)
  *   POST /jobs        gövde: DAG v0  → 201 { jobId, ... }
  *                     isteğe bağlı ?scheduler=fifo|fastest|reputation&verifier=fixed2|fixed3|adaptive|accept_first
@@ -71,6 +72,14 @@ export function httpHandler(coord: Coordinator, payments: JobPayments | null = n
     try {
       if (req.method === "OPTIONS") return send(res, 204, null);
       if (req.method === "GET" && url.pathname === "/health") return send(res, 200, { ok: true });
+      if (req.method === "GET" && (url.pathname === "/cbom" || url.pathname === "/cbom.json")) {
+        // Kriptografik envanter (CycloneDX CBOM). Kaynak Rust'ta üretilir: cargo run --bin cbom -- --out docs/cbom.json
+        try {
+          return send(res, 200, JSON.parse(await readFile(join(REPO_ROOT, "docs", "cbom.json"), "utf8")));
+        } catch {
+          return send(res, 404, { error: "cbom.json yok; üret: npm run build:cbom" });
+        }
+      }
       if (req.method === "GET" && url.pathname === "/workers") return send(res, 200, coord.listWorkers());
       if (req.method === "GET" && url.pathname === "/panel" && (await serveStatic("/panel.html", res))) return;
       if (req.method === "GET" && url.pathname === "/examples") {
