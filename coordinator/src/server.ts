@@ -10,6 +10,7 @@ import { loadOracle, type Oracle } from "./oracle.ts";
 import { JobPayments, type PaymentOptions } from "./api/payments.ts";
 import { DemoBuyer, type PayingFetchFactory } from "./api/demo-buyer.ts";
 import { PayoutService, type Chain, type PayoutOptions } from "./payouts.ts";
+import { AgentPlanner, type LlmFn } from "./agent/planner.ts";
 
 export interface ServerOptions {
   port?: number;
@@ -31,6 +32,8 @@ export interface ServerOptions {
    * (PAYOUTS=1) zincire de gönderilir.
    */
   payouts?: { chain: Chain | null } & PayoutOptions;
+  /** Ajan planlayıcısının LLM'i (hackathon). null/verilmezse kural tabanlı planlayıcı kullanılır. */
+  agentLlm?: LlmFn | null;
 }
 
 export async function createServer(opts: ServerOptions = {}) {
@@ -51,7 +54,8 @@ export async function createServer(opts: ServerOptions = {}) {
     const svc = payouts;
     coord.onSettled = (jobId) => svc.plan(jobId, coord.payoutPlan(jobId));
   }
-  const demo: { buyer: DemoBuyer | null; listensOnAll: boolean; payouts: PayoutService | null } = { buyer: null, listensOnAll: opts.host === "0.0.0.0", payouts };
+  const agent = new AgentPlanner(coord, opts.agentLlm ?? null);
+  const demo: { buyer: DemoBuyer | null; listensOnAll: boolean; payouts: PayoutService | null; agent: AgentPlanner } = { buyer: null, listensOnAll: opts.host === "0.0.0.0", payouts, agent };
   const http = createHttpServer(httpHandler(coord, payments, demo));
   const wss = attachHub(http, coord);
   await new Promise<void>((resolve) => http.listen(opts.port ?? 0, opts.host ?? "127.0.0.1", resolve));
@@ -68,6 +72,7 @@ export async function createServer(opts: ServerOptions = {}) {
     payments,
     payouts,
     demo,
+    agent,
     wss,
     url: `http://${host}:${port}`,
     wsUrl: `ws://${host}:${port}/ws`,

@@ -189,8 +189,8 @@
   const time = (t) => new Date(t).toLocaleTimeString("tr-TR", { hour12: false });
   const STATE_TR = { WAITING: "bekliyor", READY: "hazır", RUNNING: "çalışıyor", ACCEPTED: "kabul", FAILED: "başarısız" };
   // İşin kaynağı (koordinatör `source`): kim gönderdi.
-  const SOURCE_TR = { panel: "Panel", cli: "Terminal", mcp: "MCP ajanı", api: "API" };
-  const SOURCE_VIA = { panel: "panelden", cli: "terminalden", mcp: "MCP üzerinden", api: "API'den" };
+  const SOURCE_TR = { panel: "Panel", cli: "Terminal", mcp: "MCP ajanı", api: "API", agent: "Yapay zekâ ajanı" };
+  const SOURCE_VIA = { panel: "panelden", cli: "terminalden", mcp: "MCP üzerinden", api: "API'den", agent: "kontrol merkezindeki ajan üzerinden" };
   const VERIF_TR = { fixed2: "sabit 2'li", fixed3: "sabit 3'lü", adaptive: "uyarlanabilir", accept_first: "accept_first" };
   const TAU = 0.95;
 

@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kontrol Merkezi · Hermitops</title>
+<link rel="icon" href="data:,">
+<!--
+  Graf kontrol merkezi (hackathon). Derleme adımı yok; panel.html gibi düz JS.
+  Veri: GET /jobs/:id, /jobs/:id/replicas, /workers, /events, /demo/info, /agent/*.
+  Phantom ile ödeme için pkg/pay.bundle.js (npm run build:pay) kullanılır; yoksa sunucu alıcısı.
+-->
+<style>
+  :root {
+    --bg: #F4F5F7; --surface: #FFFFFF; --line: #D9DCE1; --ink: #16181D; --ink-2: #3E434B; --muted: #5B616B;
+    --teal: #0F766E; --teal-ink: #0B5A54; --teal-bg: #E6F4F1;
+    --blue: #1D4ED8; --blue-bg: #E8EEFC; --orange: #B54708; --orange-ink: #8A3505; --orange-bg: #FEF0E6;
+    --grey-bg: #EEF0F3; --edge: #6B717B;
+    --mono: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--teal); } a:hover { color: var(--teal-ink); }
+  button, input, select, textarea { font: inherit; }
+  .wrap { padding: 16px 20px 28px; display: flex; flex-direction: column; gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  header.card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand b { font-size: 16px; }
+  .sub { font-size: 12.5px; color: var(--muted); }
+  .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+  .left { flex: 1 1 320px; max-width: 390px; display: flex; flex-direction: column; gap: 14px; }
+  .center { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .right { flex: 1 1 280px; max-width: 360px; display: flex; flex-direction: column; gap: 14px; }
+  .label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .big { font-size: 28px; font-weight: 700; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stat { background: var(--bg); border-radius: 8px; padding: 7px 9px; font-size: 12.5px; color: var(--muted); }
+  .stat b { display: block; font-size: 14.5px; color: var(--ink); }
+  .btn { min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+  .btn.primary { background: var(--teal); border-color: var(--teal); color: #fff; font-weight: 600; }
+  .btn.dark { background: var(--ink); border-color: var(--ink); color: #fff; font-weight: 600; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+  .chat { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; }
+  .msg { max-width: 92%; padding: 9px 11px; border-radius: 12px 12px 12px 4px; background: var(--bg); white-space: pre-wrap; }
+  .msg.me { align-self: flex-end; background: var(--ink); color: #fff; border-radius: 12px 12px 4px 12px; }
+  .msg.ok { background: var(--teal-bg); }
+  .msg.err { background: var(--orange-bg); color: var(--orange-ink); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  textarea { width: 100%; min-height: 64px; resize: vertical; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); }
+  .inline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .inline input, .inline select { min-height: 38px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
+  .graph-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+  .graph-head h1 { margin: 0; font-size: 17px; }
+  .graph-box { overflow: auto; border-radius: 10px; }
+  svg text { font-family: Inter, system-ui, sans-serif; }
+  .node { cursor: pointer; }
+  .node:focus { outline: none; }
+  .node:focus rect, .node.sel rect { stroke-width: 3; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+  .bar { height: 8px; background: var(--grey-bg); border-radius: 4px; overflow: hidden; }
+  .bar > div { height: 8px; background: var(--teal); }
+  ol.events { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; max-height: 360px; overflow-y: auto; }
+  ol.events li { display: flex; gap: 8px; }
+  ol.events .t { font-family: var(--mono); color: var(--muted); flex: none; }
+  .warn { color: var(--orange-ink); } .good { color: var(--teal-ink); } .info { color: var(--blue); }
+  .empty { color: var(--muted); font-size: 13px; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.agent { background: var(--blue-bg); color: #1D3FA8; }
+  .pill.draft { background: var(--grey-bg); color: var(--ink-2); }
+  .pill.run { background: var(--teal-bg); color: var(--teal-ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="card">
+    <div class="brand">
+      <svg aria-hidden="true" width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="#0F766E" stroke-width="2"><circle cx="6" cy="14" r="3"/><circle cx="22" cy="6" r="3"/><circle cx="22" cy="22" r="3"/><path d="M9 13 L19 7 M9 15 L19 21"/></svg>
+      <div>
+        <b>Gönüllü Hesaplama · Kontrol Merkezi</b>
+        <div class="sub" id="status">koordinatöre bağlanılıyor…</div>
+      </div>
+    </div>
+    <div class="inline">
+      <label class="sub" for="jobInput">İş</label>
+      <input id="jobInput" class="mono" placeholder="job_…" size="14">
+      <button class="btn" id="jobGo">Göster</button>
+      <a class="btn" href="/panel" style="display:inline-flex;align-items:center;text-decoration:none">Demo paneli</a>
+    </div>
+    <div class="inline">
+      <span class="mono" id="walletAddr">cüzdan bağlı değil</span>
+      <button class="btn" id="connectBtn">Phantom ile bağlan</button>
+    </div>
+  </header>
+
+  <div class="row">
+    <aside class="left">
+      <section class="card" aria-label="Cüzdan">
+        <div class="label">Cüzdanın</div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin:6px 0 10px"><span class="big" id="balance">—</span><span class="sub">USDC (Devnet)</span></div>
+        <div class="grid3">
+          <div class="stat">Emanette<b id="stEscrow">—</b></div>
+          <div class="stat">Harcanan<b id="stSpent">—</b></div>
+          <div class="stat">İade<b id="stRefund">—</b></div>
+        </div>
+      </section>
+
+      <section class="card" aria-label="Ajan" style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="label">Ajan</span>
+          <span class="sub" id="agentMode">—</span>
+        </div>
+        <div class="chat" id="chat" aria-live="polite"></div>
+        <label class="sub" for="prompt">Ajana görev yaz</label>
+        <textarea id="prompt">İki görseli bulanıklaştır, bir matrisi çarp, hepsini tek özette birleştir.</textarea>
+        <div class="inline">
+          <label class="sub" for="budget">Bütçe (USDC)</label>
+          <input id="budget" type="number" min="0.001" step="0.01" value="0.1" style="width:90px">
+          <label class="sub" for="verifier">Doğrulama</label>
+          <select id="verifier">
+            <option value="adaptive">uyarlanabilir</option>
+            <option value="fixed2">sabit 2'li</option>
+            <option value="fixed3">sabit 3'lü</option>
+          </select>
+        </div>
+        <div class="actions"><button class="btn dark" id="planBtn">Planla</button></div>
+      </section>
+    </aside>
+
+    <main class="center card">
+      <div class="graph-head">
+        <h1 id="graphTitle">Sistem grafı</h1>
+        <span class="sub" id="graphSub">bir iş seçin ya da ajana görev verin</span>
+      </div>
+      <div class="graph-box"><svg id="graph" role="img" aria-label="Sistem grafı: cüzdan, ajan, emanet, iş akışı görevleri ve worker'lar"></svg></div>
+      <div class="legend">
+        <span><i class="sw" style="background:var(--teal-bg);border:1px solid var(--teal)"></i>kabul edildi</span>
+        <span><i class="sw" style="background:var(--blue-bg);border:2px solid var(--blue)"></i>çalışıyor</span>
+        <span><i class="sw" style="background:var(--grey-bg);border:1px solid #C4C8CF"></i>bekliyor / taslak</span>
+        <span><i class="sw" style="background:var(--orange-bg);border:2px solid var(--orange)"></i>yakalandı · iptal · hata</span>
+        <span><i style="width:22px;border-top:2px solid var(--teal)"></i>para akışı</span>
+        <span><i style="width:22px;border-top:2px dashed var(--blue)"></i>canlı atama</span>
+        <span><i style="width:22px;border-top:1px solid #9AA0A8"></i>tamamlanan atama</span>
+      </div>
+    </main>
+
+    <aside class="right">
+      <section class="card" aria-label="Seçili düğüm" style="display:flex;flex-direction:column;gap:8px">
+        <div class="label">Seçili</div>
+        <div id="inspector" class="empty">Graftan bir düğüme tıklayın.</div>
+      </section>
+      <section class="card" aria-label="Worker kazançları" style="display:flex;flex-direction:column;gap:8px">
+        <div class="label">Worker kazançları · bu iş</div>
+        <div id="earnings" class="empty">—</div>
+      </section>
+      <section class="card" aria-label="Olay akışı" style="display:flex;flex-direction:column;gap:8px">
+        <div class="label">Olay akışı</div>
+        <ol class="events" id="events"></ol>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script type="module">
+  const $ = (id) => document.getElementById(id);
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const EXPLORER = (sig) => `https://explorer.solana.com/tx/${sig}?cluster=devnet`;
+  const DEVNET_RPC = "https://api.devnet.solana.com";
+  const DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+  const usdc = (atomic) => atomic == null ? "—" : (Number(atomic) / 1e6).toFixed(Number(atomic) < 10000 ? 4 : 3).replace(".", ",");
+  const short = (s) => s && s.length > 14 ? `${s.slice(0, 6)}…${s.slice(-4)}` : s;
+
+  const S = {
+    info: null, agentInfo: null, jobId: null, job: null, replicas: [], workers: [], names: {},
+    plan: null, wallet: null, provider: null, lastEvent: 0, events: [], selected: null,
+  };
+
+  // ---------- Yardımcılar ----------
+  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function svg(tag, attrs = {}, text) { const e = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; return e; }
+  async function getJson(path) { const r = await fetch(path); if (!r.ok) throw Object.assign(new Error(`${path}: ${r.status}`), { status: r.status }); return r.json(); }
+  function browserName(w) {
+    const ua = w.userAgent || "";
+    const b = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : /HeadlessChrome|Node|fake-worker/.test(ua) ? "Headless" : "Tarayıcı";
+    const os = /Android/.test(ua) ? "Android" : /iPhone|iPad/.test(ua) ? "iOS" : /Mac OS X/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "";
+    return os ? `${b} · ${os}` : b;
+  }
+  function renameWorkers(list) {
+    const count = {}, seen = {};
+    for (const w of list) { const n = browserName(w); count[n] = (count[n] || 0) + 1; }
+    for (const w of list) { const n = browserName(w); seen[n] = (seen[n] || 0) + 1; S.names[w.id] = count[n] > 1 ? `${n} ${seen[n]}` : n; }
+  }
+  const nameOf = (id) => S.names[id] || id;
+
+  // ---------- Sohbet ----------
+  function say(text, cls = "") { const m = el("div", `msg ${cls}`, text); $("chat").append(m); $("chat").scrollTop = 1e9; return m; }
+  function sayWithLink(text, linkText, href, cls = "ok") {
+    const m = say(text, cls); m.append(" "); const a = el("a", "", linkText); a.href = href; a.target = "_blank"; a.rel = "noopener"; m.append(a); return m;
+  }
+
+  // ---------- Phantom ----------
+  function phantomProvider() {
+    if (window.phantom?.solana?.isPhantom) return window.phantom.solana;
+    if (window.solana?.isPhantom) return window.solana;
+    return null;
+  }
+  async function waitForPhantom(ms = 3000) {
+    const t0 = Date.now();
+    for (;;) { const p = phantomProvider(); if (p || Date.now() - t0 > ms) return p; await new Promise((r) => setTimeout(r, 100)); }
+  }
+  async function connectPhantom(silent = false) {
+    const p = await waitForPhantom(silent ? 1500 : 3000);
+    if (!p) { if (!silent) say("Phantom bulunamadı. Eklentiyi kurup Devnet'e geçin ve sayfayı http://localhost adresinden açın.", "err"); return; }
+    try {
+      const { publicKey } = await p.connect(silent ? { onlyIfTrusted: true } : undefined);
+      S.provider = p; S.wallet = publicKey.toString();
+      $("walletAddr").textContent = short(S.wallet); $("connectBtn").textContent = "Bağlı";
+      p.on?.("accountChanged", (pk) => { S.wallet = pk ? pk.toString() : null; $("walletAddr").textContent = S.wallet ? short(S.wallet) : "cüzdan bağlı değil"; refreshBalance(); });
+      refreshBalance(); renderPlanActions();
+    } catch (e) { if (!silent) say(e?.code === 4001 ? "Bağlantı reddedildi." : `Phantom hatası: ${e?.message ?? e}`, "err"); }
+  }
+  async function refreshBalance() {
+    if (!S.wallet) return;
+    try {
+      const r = await fetch(DEVNET_RPC, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+        jsonrpc: "2.0", id: 1, method: "getTokenAccountsByOwner", params: [S.wallet, { mint: DEVNET_USDC_MINT }, { encoding: "jsonParsed" }],
+      }) });
+      const body = await r.json();
+      const total = (body.result?.value ?? []).reduce((s, a) => s + Number(a.account.data.parsed.info.tokenAmount.amount), 0);
+      $("balance").textContent = usdc(total);
+    } catch { $("balance").textContent = "?"; }
+  }
+
+  // ---------- Ajan ----------
+  async function plan() {
+    const prompt = $("prompt").value.trim();
+    if (!prompt) return;
+    const maxUsdc = Number($("budget").value);
+    say(`${prompt}\nBütçe: ${String(maxUsdc).replace(".", ",")} USDC`, "me");
+    $("planBtn").disabled = true;
+    const wait = say("Planlıyorum…");
+    try {
+      const r = await fetch("/agent/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt, maxUsdc, verifier: $("verifier").value }) });
+      const body = await r.json();
+      wait.remove();
+      if (!r.ok) { say(`Plan yapılamadı: ${body.error}`, "err"); return; }
+      S.plan = body; S.selected = null;
+      const n = body.dag.tasks.length;
+      say(`${n} görevlik bir iş akışı hazırladım ve grafa taslak olarak çizdim (${body.planner === "llm" ? "LLM" : "kurallar"}).\n${body.explanation}`, body.withinBudget ? "" : "err");
+      if (body.fallbackReason) say(`Not: LLM yanıtı kullanılamadı, kurallara düştüm (${body.fallbackReason}).`, "err");
+      renderPlanActions();
+      render();
+    } catch (e) { wait.remove(); say(`Bağlantı hatası: ${e.message}`, "err"); }
+    finally { $("planBtn").disabled = false; }
+  }
+  function renderPlanActions() {
+    document.querySelectorAll(".plan-actions").forEach((n) => n.remove());
+    if (!S.plan || S.plan.jobId) return;
+    const box = el("div", "actions plan-actions");
+    if (S.plan.withinBudget) {
+      const paymentsOn = !!S.info?.payment;
+      if (!paymentsOn || S.agentInfo?.buyerAvailable) {
+        const b = el("button", "btn primary", paymentsOn ? "Onayla ve öde (sunucu cüzdanı)" : "Onayla ve çalıştır (ödeme kapalı)");
+        b.onclick = () => approveServer(b); box.append(b);
+      }
+      if (paymentsOn) {
+        const b = el("button", "btn primary", S.wallet ? "Onayla ve Phantom ile öde" : "Phantom'u bağla ve öde");
+        b.onclick = () => approvePhantom(b); box.append(b);
+      }
+    }
+    const again = el("button", "btn", "Yeniden planla"); again.onclick = () => { S.plan = null; renderPlanActions(); render(); $("prompt").focus(); };
+    box.append(again);
+    $("chat").append(box); $("chat").scrollTop = 1e9;
+  }
+  async function approveServer(btn) {
+    btn.disabled = true;
+    say(S.info?.payment ? "Sunucu cüzdanıyla ödüyorum…" : "Ödeme kapalı; işi doğrudan gönderiyorum…");
+    try {
+      const r = await fetch("/agent/approve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ planId: S.plan.planId }) });
+      const body = await r.json();
+      if (!r.ok || !body.jobId) { say(`Ödeme yapılamadı: ${body.error ?? r.status}`, "err"); btn.disabled = false; return; }
+      paid(body.jobId, body.transaction);
+    } catch (e) { say(`Bağlantı hatası: ${e.message}`, "err"); btn.disabled = false; }
+  }
+  async function approvePhantom(btn) {
+    if (!S.wallet) await connectPhantom();
+    if (!S.wallet) return;
+    btn.disabled = true;
+    let mod;
+    try { mod = await import("/pkg/pay.bundle.js"); }
+    catch { say("Phantom ödeme modülü derlenmemiş: npm run build:pay", "err"); btn.disabled = false; return; }
+    const q = new URLSearchParams({ scheduler: S.plan.options.scheduler, verifier: S.plan.options.verifier, source: "agent" });
+    say("Phantom'da işlemi onaylayın…");
+    try {
+      const out = await mod.hermitPay({
+        provider: S.provider, address: S.wallet, maxAtomic: BigInt(S.plan.maxAtomic),
+        url: `/jobs?${q}`, body: JSON.stringify(S.plan.dag),
+        onStep: (s) => { if (s.kind === "payment_required") say("Koordinatör 402 döndü: ödeme gerekiyor."); },
+      });
+      if (!out.ok) { say(`Ödeme yapılamadı: ${out.error}`, "err"); btn.disabled = false; return; }
+      paid(out.jobId, out.payment?.transaction);
+      setTimeout(refreshBalance, 4000);
+    } catch (e) { say(e?.code === 4001 ? "Phantom'da reddedildi." : `Ödeme hatası: ${e?.message ?? e}`, "err"); btn.disabled = false; }
+  }
+  function paid(jobId, tx) {
+    S.plan.jobId = jobId;
+    renderPlanActions();
+    if (tx) sayWithLink(`Ödendi. İş ${jobId} çalışıyor.`, "İşlemi Explorer'da aç", EXPLORER(tx));
+    else say(`İş ${jobId} çalışıyor.`, "ok");
+    setJob(jobId);
+  }
+
+  // ---------- İş seçimi ve yoklama ----------
+  function setJob(jobId) {
+    S.jobId = jobId; S.job = null; S.replicas = []; S.selected = null;
+    $("jobInput").value = jobId || "";
+    const u = new URL(location.href); if (jobId) u.searchParams.set("job", jobId); else u.searchParams.delete("job"); history.replaceState(null, "", u);
+    pollJob();
+  }
+  async function pollJob() {
+    if (!S.jobId) return;
+    const id = S.jobId;
+    try {
+      const [job, reps] = await Promise.all([getJson(`/jobs/${id}`), getJson(`/jobs/${id}/replicas`)]);
+      if (id !== S.jobId) return;
+      S.job = job; S.replicas = reps;
+      if (S.plan && S.plan.jobId === id) S.plan = null; // taslak yerine canlı iş
+    } catch (e) { if (e.status === 404) $("graphSub").textContent = `${id} bulunamadı`; }
+  }
+  async function pollWorkers() {
+    try { S.workers = await getJson("/workers"); renameWorkers(S.workers); $("status").textContent = `koordinatör bağlı · ${S.workers.length} worker · ${S.info?.payment ? "x402 ödeme açık (Devnet)" : "ödeme kapalı"}`; }
+    catch { $("status").textContent = "koordinatöre ulaşılamıyor"; }
+  }
+  async function pollEvents() {
+    try {
+      const rows = await getJson(`/events?since=${S.lastEvent}`);
+      for (const r of rows) {
+        S.lastEvent = Math.max(S.lastEvent, r.id);
+        const d = r.detail || {};
+        if (r.event === "job_submitted" && d.source === "agent" && !S.jobId) setJob(d.jobId);
+        const line = describe(r.event, d);
+        if (line) S.events.unshift({ t: r.t, ...line });
+      }
+      S.events.length = Math.min(S.events.length, 60);
+    } catch { /* bir sonraki turda */ }
+  }
+  function describe(ev, d) {
+    const who = (id) => nameOf(id);
+    switch (ev) {
+      case "agent_planned": return { cls: "info", b: "agent_planned", text: `${d.tasks} görev, üst sınır ${usdc(d.capAtomic)} USDC${d.withinBudget ? "" : " · bütçeyi aşıyor"}` };
+      case "job_submitted": return { cls: d.source === "agent" ? "info" : "", b: "job_submitted", text: `${d.jobId} · ${d.tasks} görev · kaynak ${d.source}` };
+      case "job_paid": return { cls: "good", b: "job_paid", text: `${d.jobId} · ${usdc(d.capAtomic)} USDC emanette`, tx: d.transaction };
+      case "spotcheck_failed": return { cls: "warn", b: "spotcheck_failed", text: `${who(d.workerId)} sınamada yakalandı` };
+      case "retroactive_cancel": return { cls: "warn", b: "retroactive_cancel", text: `${who(d.workerId)} · ${(d.tasks || []).length} sonuç iptal, yeniden kuyrukta` };
+      case "result_mismatch": return { cls: "warn", b: "result_mismatch", text: `${who(d.workerId)} sonucu uyuşmadı` };
+      case "worker_trusted": return { cls: "good", b: "worker_trusted", text: `${who(d.workerId)} tek kopya moduna geçti` };
+      case "worker_untrusted": return { cls: "warn", b: "worker_untrusted", text: `${who(d.workerId)} güvenini kaybetti` };
+      case "job_finished": return { cls: d.state === "COMPLETED" ? "good" : "warn", b: "job_finished", text: `${d.jobId} · ${d.state}` };
+      case "payouts_planned": return { cls: "", b: "payouts_planned", text: `${d.jobId} · ${d.rows} ödeme kalemi` };
+      case "payout_confirmed": return { cls: "good", b: "payout_confirmed", text: `${(d.ids || []).length} kalem zincirde`, tx: d.signature };
+      case "worker_connected": return { cls: "", b: "worker_connected", text: who(d.id) };
+      case "worker_disconnected": return { cls: "", b: "worker_disconnected", text: `${who(d.id)}${d.reason ? ` · ${d.reason}` : ""}` };
+      default: return null;
+    }
+  }
+
+  // ---------- Graf ----------
+  const NW = 136, NH = 52, WW = 168, COL = 184, ROWH = 68, TOP = 172, PAD = 24;
+  function layoutDag(tasks) {
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const level = new Map();
+    const lv = (id, seen = new Set()) => {
+      if (level.has(id)) return level.get(id);
+      if (seen.has(id)) return 0; seen.add(id);
+      const deps = byId.get(id)?.deps ?? [];
+      const l = deps.length ? 1 + Math.max(...deps.map((d) => lv(d, seen))) : 0;
+      level.set(id, l); return l;
+    };
+    tasks.forEach((t) => lv(t.id));
+    const cols = [];
+    for (const t of tasks) { const l = level.get(t.id); (cols[l] ||= []).push(t.id); }
+    const pos = new Map();
+    const maxRows = Math.max(1, ...cols.map((c) => c.length));
+    cols.forEach((ids, l) => ids.forEach((id, i) => {
+      const offset = ((maxRows - ids.length) * ROWH) / 2;
+      pos.set(id, { x: PAD + l * COL, y: TOP + offset + i * ROWH });
+    }));
+    return { pos, width: PAD + Math.max(1, cols.length) * COL - (COL - NW), height: maxRows * ROWH };
+  }
+  function taskStyle(t, draft) {
+    if (draft) return { fill: "#EEF0F3", stroke: "#C4C8CF", sw: 1 };
+    if (t.state === "ACCEPTED") return { fill: "#E6F4F1", stroke: "#0F766E", sw: 1 };
+    if (t.state === "RUNNING" || t.state === "READY") return { fill: "#E8EEFC", stroke: "#1D4ED8", sw: 2 };
+    if (t.state === "FAILED" || t.state === "CANCELLED") return { fill: "#FEF0E6", stroke: "#B54708", sw: 2 };
+    return { fill: "#EEF0F3", stroke: "#C4C8CF", sw: 1 };
+  }
+  function addNode(g, { x, y, w = NW, h = NH, fill, stroke, sw = 1, title, sub, ink = "#16181D", key, label }) {
+    const n = svg("g", { class: `node${S.selected === key ? " sel" : ""}`, tabindex: "0", role: "button", "aria-label": label || `${title}, ${sub}` });
+    n.append(svg("rect", { x, y, width: w, height: h, rx: 9, fill, stroke, "stroke-width": sw }));
+    n.append(svg("text", { x: x + 10, y: y + 21, "font-size": 13, "font-weight": 700, fill: ink }, title));
+    n.append(svg("text", { x: x + 10, y: y + 39, "font-size": 11.5, fill: ink === "#fff" ? "#E6E8EB" : "#3E434B" }, sub));
+    const pick = () => { S.selected = key; render(); };
+    n.addEventListener("click", pick);
+    n.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    g.append(n);
+  }
+  function addEdge(g, x1, y1, x2, y2, { color = "#6B717B", dash = null, width = 2, href = null, title = null, curve = true } = {}) {
+    const mx = (x1 + x2) / 2;
+    const d = curve && Math.abs(y2 - y1) > 1 ? `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}` : `M ${x1} ${y1} L ${x2} ${y2}`;
+    const p = svg("path", { d, fill: "none", stroke: color, "stroke-width": width, "marker-end": `url(#head-${color.slice(1)})`, ...(dash ? { "stroke-dasharray": dash } : {}) });
+    if (title) p.append(svg("title", {}, title));
+    if (href) {
+      const a = svg("a", { href, target: "_blank", rel: "noopener" }); a.append(p);
+      a.append(svg("path", { d, fill: "none", stroke: "transparent", "stroke-width": 12 }));
+      g.append(a);
+    } else g.append(p);
+  }
+  function addLabel(g, x, y, text, color = "#5B616B") { g.append(svg("text", { x, y, "font-size": 11.5, fill: color, "text-anchor": "middle" }, text)); }
+
+  function render() {
+    const draft = !!S.plan && !S.plan.jobId;
+    const job = draft ? null : S.job;
+    const tasks = draft ? S.plan.dag.tasks.map((t) => ({ ...t, state: "DRAFT" })) : job?.tasks ?? [];
+    const g = $("graph"); g.replaceChildren();
+    const defs = svg("defs");
+    for (const c of ["#6B717B", "#0F766E", "#1D4ED8", "#B54708", "#9AA0A8"]) {
+      const m = svg("marker", { id: `head-${c.slice(1)}`, orient: "auto", markerWidth: 6, markerHeight: 6, refX: 5, refY: 3, viewBox: "0 0 6 6" });
+      m.append(svg("path", { d: "M0 0 L6 3 L0 6 Z", fill: c })); defs.append(m);
+    }
+    g.append(defs);
+
+    const { pos, width: dagW, height: dagH } = layoutDag(tasks);
+    const jobWorkers = new Set(S.replicas.filter((r) => r.workerId).map((r) => r.workerId));
+    const live = S.workers.map((w) => w.id);
+    const workerIds = [...new Set([...live, ...jobWorkers])];
+    const wx = Math.max(dagW + 80, 560);
+    const W = Math.max(wx + WW + PAD, 760);
+    const H = TOP + Math.max(dagH, workerIds.length * ROWH, ROWH) + 40;
+    g.setAttribute("width", W); g.setAttribute("height", H); g.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+    // Bölge zeminleri
+    g.append(svg("rect", { x: 8, y: TOP - 34, width: dagW + 32, height: Math.max(dagH, ROWH) + 46, rx: 12, fill: "#F8F9FA", stroke: "#C4C8CF", "stroke-dasharray": "4 4" }));
+    g.append(svg("rect", { x: wx - 16, y: TOP - 34, width: WW + 32, height: Math.max(workerIds.length, 1) * ROWH + 46, rx: 12, fill: "#F8F9FA", stroke: "#C4C8CF", "stroke-dasharray": "4 4" }));
+    g.append(svg("text", { x: 24, y: TOP - 14, "font-size": 11.5, "font-weight": 700, fill: "#5B616B" }, draft ? `TASLAK İŞ AKIŞI · ${tasks.length} GÖREV` : tasks.length ? `İŞ AKIŞI · ${tasks.length} GÖREV` : "İŞ AKIŞI"));
+    g.append(svg("text", { x: wx, y: TOP - 14, "font-size": 11.5, "font-weight": 700, fill: "#5B616B" }, "WORKER'LAR"));
+
+    // Üst sıra: cüzdan → ajan → emanet
+    const pay = job?.payment;
+    const payouts = pay?.payouts ?? [];
+    const topY = 32, cw = 176;
+    const xWallet = PAD, xAgent = Math.round(W / 2 - cw / 2), xEscrow = wx - 4;
+    const agentBudget = S.plan ? `bütçe ${String(S.plan.maxUsdc).replace(".", ",")}` : job?.source === "agent" ? "işi ajan gönderdi" : "görev bekliyor";
+    addEdge(g, xWallet + cw, topY + 30, xAgent - 2, topY + 30, { curve: false });
+    addLabel(g, (xWallet + cw + xAgent) / 2, topY + 22, "bütçe");
+    addEdge(g, xAgent + cw, topY + 30, xEscrow - 2, topY + 30, { color: "#0F766E", curve: false, href: pay?.transaction ? EXPLORER(pay.transaction) : null, title: pay?.transaction ? "x402 ödeme işlemi" : null });
+    addLabel(g, (xAgent + cw + xEscrow) / 2, topY + 22, "x402 ödeme", "#0B5A54");
+    if (tasks.length) addEdge(g, xAgent + cw / 2, topY + 60, xAgent + cw / 2, TOP - 38, { curve: false });
+    addNode(g, { x: xWallet, y: topY, w: cw, h: 60, fill: "#fff", stroke: "#C4C8CF", title: "Cüzdanın", sub: S.wallet ? `${short(S.wallet)} · ${$("balance").textContent} USDC` : "Phantom bağlı değil", key: "wallet" });
+    addNode(g, { x: xAgent, y: topY, w: cw, h: 60, fill: "#16181D", stroke: "#16181D", ink: "#fff", title: "Ajan", sub: agentBudget, key: "agent" });
+    addNode(g, { x: xEscrow, y: topY, w: cw, h: 60, fill: "#E6F4F1", stroke: "#0F766E", title: "Emanet", sub: draft ? `üst sınır ${usdc(S.plan.quote.capAtomic)}` : pay ? `${usdc(pay.capAtomic)} · gerç. ${usdc(pay.realizedAtomic)}` : "ödeme yok", key: "escrow" });
+
+    // DAG kenarları
+    for (const t of tasks) for (const d of t.deps ?? []) {
+      const a = pos.get(d), b = pos.get(t.id); if (!a || !b) continue;
+      addEdge(g, a.x + NW, a.y + NH / 2, b.x - 2, b.y + NH / 2);
+    }
+    // Worker konumları
+    const wpos = new Map(workerIds.map((id, i) => [id, { x: wx, y: TOP + i * ROWH }]));
+    // Geçmiş atamalar: sonucu dönmüş kopyalar soluk çizgiyle (görev → worker)
+    const drawn = new Set();
+    for (const r of S.replicas) {
+      if (r.spot || !r.workerId || r.state === "ASSIGNED" || r.state === "QUEUED") continue;
+      const k = `${r.task}|${r.workerId}`; if (drawn.has(k)) continue; drawn.add(k);
+      const a = pos.get(r.task), b = wpos.get(r.workerId); if (!a || !b) continue;
+      addEdge(g, a.x + NW, a.y + NH / 2, b.x - 2, b.y + NH / 2, { color: "#9AA0A8", width: 1, title: `${r.task} → ${nameOf(r.workerId)} · ${r.state}` });
+    }
+    // Canlı atamalar (yalnızca bu işin görevleri)
+    for (const w of S.workers) {
+      const doing = w.doing; if (!doing || doing.spot || doing.jobId !== S.jobId) continue;
+      const a = pos.get(doing.task), b = wpos.get(w.id); if (!a || !b) continue;
+      addEdge(g, a.x + NW, a.y + NH / 2, b.x - 2, b.y + NH / 2, { color: "#1D4ED8", dash: "5 4", title: `${doing.task} → ${nameOf(w.id)}` });
+    }
+    // Para kenarları: emanet → worker (ödeme planı/kesinleşme)
+    payouts.filter((p) => p.kind === "worker").forEach((p) => {
+      const b = wpos.get(p.payee); if (!b) return;
+      const ok = p.status === "confirmed" || p.status === "sent";
+      if (p.status === "no_wallet") return;
+      addEdge(g, xEscrow + cw / 2 + 40, topY + 60, b.x + WW / 2 + 40, b.y - 2, { color: "#0F766E", dash: ok ? null : "3 4", href: p.transaction ? EXPLORER(p.transaction) : null, title: `${nameOf(p.payee)}: ${usdc(p.amountAtomic)} USDC · ${p.status}`, curve: false });
+    });
+
+    // Görev düğümleri
+    for (const t of tasks) {
+      const p = pos.get(t.id); const st = taskStyle(t, draft);
+      const sub = draft ? `${t.module} · taslak` : t.state === "ACCEPTED" ? `${t.module} · ${t.single ? "tek kopya" : `${t.agreeing} kopya`}` : `${t.module} · ${trState(t.state)}`;
+      addNode(g, { x: p.x, y: p.y, fill: st.fill, stroke: st.stroke, sw: st.sw, title: t.id, sub, key: `task:${t.id}` });
+    }
+    // Worker düğümleri
+    for (const id of workerIds) {
+      const w = S.workers.find((x) => x.id === id); const p = wpos.get(id);
+      const flagged = w && (w.flagged || (w.reputation < 0.3 && w.beta > 0)); const busyHere = w?.doing && w.doing.jobId === S.jobId && !w.doing.spot;
+      const fill = !w ? "#EEF0F3" : flagged ? "#FEF0E6" : "#fff";
+      const stroke = !w ? "#C4C8CF" : flagged ? "#B54708" : busyHere ? "#1D4ED8" : w.trusted ? "#0F766E" : "#C4C8CF";
+      const sub = !w ? "ayrıldı" : `R ${w.reputation.toFixed(2)} · ${flagged ? (w.caught ? `${w.caught} kez yakalandı` : "hatalı sonuç") : w.trusted ? "güvenilir" : "2 kopya modu"}`;
+      addNode(g, { x: p.x, y: p.y, w: WW, fill, stroke, sw: flagged || busyHere ? 2 : 1, title: nameOf(id), sub, key: `worker:${id}` });
+    }
+    if (!tasks.length && !workerIds.length) addLabel(g, W / 2, TOP + 40, "Henüz iş yok: ajana görev verin ya da bir iş kimliği girin.");
+
+    // Başlık ve yan paneller
+    $("graphTitle").textContent = draft ? `Sistem grafı · taslak (${S.plan.dag.jobId})` : job ? `Sistem grafı · ${job.jobId}` : "Sistem grafı";
+    if (job) {
+      const acc = job.tasks.filter((t) => t.state === "ACCEPTED").length;
+      $("graphSub").replaceChildren(el("span", `pill ${job.source === "agent" ? "agent" : "run"}`, job.source === "agent" ? "ajan" : job.source), ` ${job.scheduler} + ${job.verifier} · ${acc}/${job.tasks.length} görev kabul · ${job.status}`);
+    } else if (draft) $("graphSub").replaceChildren(el("span", "pill draft", "taslak"), ` üst sınır ${usdc(S.plan.quote.capAtomic)} USDC · ${S.plan.withinBudget ? "bütçe içinde" : "bütçeyi aşıyor"}`);
+    $("stEscrow").textContent = draft ? usdc(S.plan.quote.capAtomic) : usdc(pay?.capAtomic);
+    $("stSpent").textContent = usdc(pay?.realizedAtomic);
+    const refund = payouts.find((p) => p.kind === "refund");
+    $("stRefund").textContent = refund ? `${usdc(refund.amountAtomic)} · ${refund.status === "confirmed" ? "geldi" : refund.status}` : pay?.refundDueAtomic != null ? usdc(pay.refundDueAtomic) : job?.status === "RUNNING" ? "bekliyor" : "—";
+    renderInspector(); renderEarnings(payouts); renderEvents();
+  }
+  const trState = (s) => ({ WAITING: "bekliyor", READY: "hazır", RUNNING: "çalışıyor", ACCEPTED: "kabul", FAILED: "başarısız", CANCELLED: "iptal" }[s] || s);
+
+  function renderInspector() {
+    const box = $("inspector"); box.className = ""; box.replaceChildren();
+    const key = S.selected;
+    if (!key) { box.className = "empty"; box.textContent = "Graftan bir düğüme tıklayın."; return; }
+    const kv = (pairs) => { const g = el("div", "grid2"); for (const [k, v] of pairs) { const s = el("div", "stat", k); s.append(el("b", "", String(v))); g.append(s); } return g; };
+    if (key.startsWith("worker:")) {
+      const id = key.slice(7); const w = S.workers.find((x) => x.id === id);
+      box.append(el("div", "", nameOf(id)), el("div", "mono", `${id} · ${w?.wallet ? short(w.wallet) : "cüzdan yok"}`));
+      const mine = S.replicas.filter((r) => r.workerId === id);
+      box.append(kv([
+        ["İtibar R", w ? w.reputation.toFixed(3) : "—"], ["Yakalanma", w?.caught ?? "—"],
+        ["Bu işte kopya", mine.filter((r) => !r.spot).length], ["Ödenen", mine.filter((r) => r.paid).length],
+      ]));
+      if (w?.doing) box.append(el("div", "sub", w.doing.spot ? "Şu an: sınama işi" : `Şu an: ${w.doing.module} · ${w.doing.task}`));
+    } else if (key.startsWith("task:")) {
+      const id = key.slice(5);
+      const t = (S.plan && !S.plan.jobId ? S.plan.dag.tasks : S.job?.tasks ?? []).find((x) => x.id === id);
+      if (!t) return;
+      box.append(el("div", "", `${t.id} · ${t.module}`));
+      box.append(kv([["Durum", t.state ? trState(t.state) : "taslak"], ["Bağımlılık", (t.deps ?? []).join(", ") || "yok"], ["Kopya", t.replicas ?? "—"], ["Kabul", t.single ? "tek kopya" : t.agreeing ? `${t.agreeing} eşleşme` : "—"]]));
+      const input = el("pre", "mono", JSON.stringify(t.input ?? {}, null, 1)); input.style.cssText = "margin:0;white-space:pre-wrap;background:var(--bg);padding:8px;border-radius:8px;max-height:140px;overflow:auto";
+      if (t.input) box.append(input);
+      if (t.output?.hash) box.append(el("div", "mono", `çıktı: ${short(t.output.hash)}`));
+    } else if (key === "escrow") {
+      const p = S.job?.payment;
+      box.append(el("div", "", "Emanet"));
+      box.append(kv([["Üst sınır", p ? usdc(p.capAtomic) : S.plan ? usdc(S.plan.quote.capAtomic) : "—"], ["Gerçekleşen", usdc(p?.realizedAtomic)], ["İade", usdc(p?.refundDueAtomic)], ["Ödeyen", p?.payer ? short(p.payer) : "—"]]));
+      if (p?.transaction) { const a = el("a", "", "Ödeme işlemini Explorer'da aç"); a.href = EXPLORER(p.transaction); a.target = "_blank"; box.append(a); }
+    } else if (key === "agent") {
+      box.append(el("div", "", "Ajan"), el("div", "sub", S.agentInfo?.llm ? "Planlayıcı: LLM (Claude)" : "Planlayıcı: kurallar (LLM anahtarı yok)"));
+      if (S.plan) box.append(el("div", "sub", S.plan.explanation));
+    } else if (key === "wallet") {
+      box.append(el("div", "", "Cüzdanın"), el("div", "mono", S.wallet ?? "Phantom bağlı değil"));
+    }
+  }
+  function renderEarnings(payouts) {
+    const box = $("earnings"); box.replaceChildren();
+    const units = new Map();
+    for (const r of S.replicas) if (r.paid && r.workerId) units.set(r.workerId, (units.get(r.workerId) || 0) + 1);
+    for (const w of S.workers) if (!units.has(w.id) && S.replicas.some((r) => r.workerId === w.id)) units.set(w.id, 0);
+    if (!units.size) { box.className = "empty"; box.textContent = S.job ? "Henüz ödenecek kopya yok." : "—"; return; }
+    box.className = "";
+    const max = Math.max(1, ...units.values());
+    for (const [id, n] of [...units].sort((a, b) => b[1] - a[1])) {
+      const p = payouts.find((x) => x.kind === "worker" && x.payee === id);
+      const row = el("div"); row.style.cssText = "display:flex;flex-direction:column;gap:4px;font-size:13px";
+      const top = el("div"); top.style.cssText = "display:flex;justify-content:space-between;gap:8px";
+      top.append(el("span", "", nameOf(id)), el("span", p?.status === "no_wallet" ? "sub" : "", p ? `${n} birim · ${usdc(p.amountAtomic)} · ${p.status}` : `${n} birim`));
+      const bar = el("div", "bar"); const fillDiv = el("div"); fillDiv.style.width = `${(n / max) * 100}%`; bar.append(fillDiv);
+      row.append(top, bar); box.append(row);
+    }
+  }
+  function renderEvents() {
+    const ol = $("events"); ol.replaceChildren();
+    if (!S.events.length) { ol.append(el("li", "empty", "Henüz olay yok.")); return; }
+    for (const e of S.events.slice(0, 30)) {
+      const li = el("li"); li.append(el("span", "t", new Date(e.t).toLocaleTimeString("tr-TR")));
+      const body = el("span", e.cls); body.append(el("b", "", e.b), ` · ${e.text}`);
+      if (e.tx) { body.append(" · "); const a = el("a", "", "tx"); a.href = EXPLORER(e.tx); a.target = "_blank"; a.rel = "noopener"; body.append(a); }
+      li.append(body); ol.append(li);
+    }
+  }
+
+  // ---------- Başlat ----------
+  async function init() {
+    try { S.info = await getJson("/demo/info"); } catch { S.info = null; }
+    try {
+      S.agentInfo = await getJson("/agent/info");
+      $("agentMode").textContent = S.agentInfo.local ? (S.agentInfo.llm ? "LLM planlayıcı" : "kural planlayıcı") : "yalnızca koordinatör makinesinden";
+      if (!S.agentInfo.local) $("planBtn").disabled = true;
+    } catch { $("agentMode").textContent = "ajan kapalı"; $("planBtn").disabled = true; }
+    say("Merhaba. Görevi yaz, bütçeni ver; iş akışını grafa çizip teklifini göstereyim. Ödemeyi sen onaylayınca yaparım.");
+    $("planBtn").onclick = plan;
+    $("connectBtn").onclick = () => connectPhantom(false);
+    $("jobGo").onclick = () => { const v = $("jobInput").value.trim(); S.plan = null; renderPlanActions(); setJob(v || null); };
+    connectPhantom(true);
+    const q = new URL(location.href).searchParams.get("job");
+    if (q) setJob(q);
+    const tick = async () => { await Promise.all([pollWorkers(), pollEvents(), pollJob()]); render(); };
+    await tick();
+    setInterval(tick, 1000);
+    setInterval(refreshBalance, 20000);
+  }
+  init();
+</script>
+</body>
+</html>
